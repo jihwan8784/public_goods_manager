@@ -9,7 +9,9 @@ import ItemThumb from "@/components/ItemThumb";
 import PeriodFields, { periodError, type Period } from "@/components/PeriodFields";
 import QrPanel from "@/components/QrPanel";
 import {
+  AccessBadge,
   AvailBadge,
+  LiveBadge,
   btn,
   Card,
   ErrorState,
@@ -24,10 +26,20 @@ import {
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { defaultSlot, dueText, fmtDateTime, fmtRange, toIso } from "@/lib/time";
-import type { BusyPeriod, ItemBrief, ItemFull } from "@/lib/types";
+import { ORG_KIND_ICON } from "@/lib/labels";
+import type { BusyPeriod, ItemBrief, ItemFull, OrgFull } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
 
-type Detail = { item: ItemFull; current_rental: BusyPeriod | null; busy: BusyPeriod[]; siblings: ItemBrief[] };
+type Detail = {
+  item: ItemFull;
+  org: OrgFull | null;
+  eligible: boolean;
+  eligible_reason: string | null;
+  can_manage: boolean;
+  current_rental: BusyPeriod | null;
+  busy: BusyPeriod[];
+  siblings: ItemBrief[];
+};
 
 function initialPeriod(start: string | null, end: string | null): Period {
   const d = defaultSlot();
@@ -42,15 +54,17 @@ function initialPeriod(start: string | null, end: string | null): Period {
 export default function ItemDetail() {
   const { id } = useParams<{ id: string }>();
   const params = useSearchParams();
-  const user = useUser();
-  const isAdmin = user.role === "admin";
-  const { data, error, loading, reload } = useLoad<Detail>(/^\d+$/.test(id) ? `/items/${id}` : null);
+  useUser();
+  const { data, error, loading, reload, updatedAt } = useLoad<Detail>(/^\d+$/.test(id) ? `/items/${id}` : null, {
+    refreshMs: 15000,
+  });
 
   if (!/^\d+$/.test(id)) return <ErrorState message="잘못된 물품 주소입니다." />;
   if (loading && !data) return <Loading />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (!data) return null;
-  const { item, current_rental, busy, siblings } = data;
+  const { item, org, current_rental, busy, siblings } = data;
+  const isAdmin = data.can_manage;
 
   return (
     <>
@@ -64,9 +78,23 @@ export default function ItemDetail() {
                 <h1 className="text-2xl font-bold">{item.name}</h1>
                 <p className="font-mono text-sm text-navy-600">관리번호 {item.asset_code}</p>
               </div>
-              <ItemBadge status={item.status} />
+              <div className="flex flex-wrap gap-1">
+                <ItemBadge status={item.status} />
+                <AccessBadge access={item.access} />
+              </div>
             </div>
             <dl className="mt-4 grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+              <dt className="font-semibold text-navy-600">기관</dt>
+              <dd>
+                {org ? (
+                  <Link href={`/items?org=${org.id}`} className="font-semibold text-teal-800 underline">
+                    {ORG_KIND_ICON[org.kind]} {org.name}
+                  </Link>
+                ) : (
+                  "-"
+                )}
+                {org?.address && <span className="block text-xs text-navy-600">{org.address}</span>}
+              </dd>
               <dt className="font-semibold text-navy-600">카테고리</dt>
               <dd>{item.category}</dd>
               <dt className="font-semibold text-navy-600">보관 장소</dt>
@@ -117,7 +145,10 @@ export default function ItemDetail() {
 
         <div className="grid content-start gap-6">
           <Card>
-            <h2 className="text-lg font-bold">현재 상태</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-bold">현재 상태</h2>
+              <LiveBadge updatedAt={updatedAt} />
+            </div>
             {item.status === "repair" && (
               <p className="mt-2 rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-900">🔧 수리 중이라 지금은 예약할 수 없습니다.</p>
             )}
@@ -156,8 +187,19 @@ export default function ItemDetail() {
             )}
           </Card>
 
-          {item.status === "normal" && (
+          {item.status === "normal" && data.eligible && (
             <ReserveForm itemId={item.id} initial={initialPeriod(params.get("start"), params.get("end"))} onDone={reload} />
+          )}
+          {item.status === "normal" && !data.eligible && (
+            <Card>
+              <h2 className="text-lg font-bold">예약 신청</h2>
+              <p role="status" className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
+                🎓 {data.eligible_reason}
+              </p>
+              <Link href="/me/profile" className={`${btn.secondary} mt-3`}>
+                학생 인증 확인하기
+              </Link>
+            </Card>
           )}
           <ReportForm itemId={item.id} />
         </div>

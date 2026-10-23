@@ -8,18 +8,26 @@ import { btn, ErrorState, Forbidden, Loading } from "./ui";
 
 const USER_NAV = [
   { href: "/", label: "홈" },
+  { href: "/map", label: "지도" },
   { href: "/items", label: "물품 찾기" },
   { href: "/me", label: "나의 예약·대여" },
+  { href: "/me/profile", label: "내 정보" },
 ];
-const ADMIN_NAV = [
+const STAFF_NAV = [
   { href: "/admin/reservations", label: "예약·대여 관리" },
   { href: "/admin/items", label: "물품 관리" },
   { href: "/admin/reports", label: "고장 신고" },
+];
+const SUPER_NAV = [
+  { href: "/admin/orgs", label: "기관" },
   { href: "/admin/users", label: "회원" },
 ];
+const SUPER_ONLY = ["/admin/orgs", "/admin/users"];
 
 function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
+  if (href === "/") return pathname === "/";
+  if (href === "/me") return pathname === "/me";
+  return pathname === href || pathname.startsWith(href + "/");
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -49,9 +57,17 @@ function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isAdmin = user.role === "admin";
-  const nav = isAdmin ? [...USER_NAV, ...ADMIN_NAV] : USER_NAV;
+  const isSuper = user.role === "admin";
+  const managesSchool = user.managed_orgs.some((o) => o.kind === "school");
+  const nav = [
+    ...USER_NAV,
+    ...(user.is_staff ? STAFF_NAV : []),
+    ...(isSuper || managesSchool ? [{ href: "/admin/students", label: "학생 승인" }] : []),
+    ...(isSuper ? SUPER_NAV : []),
+  ];
   const adminArea = pathname.startsWith("/admin");
+  const forbidden =
+    (adminArea && !user.is_staff) || (SUPER_ONLY.some((p) => pathname.startsWith(p)) && !isSuper);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -72,8 +88,10 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 text-sm">
             <span className="text-navy-100">
               {user.name}
-              {isAdmin && (
-                <span className="ml-1.5 rounded bg-teal-500 px-1.5 py-0.5 text-xs font-bold text-navy-900">관리자</span>
+              {(isSuper || user.is_staff) && (
+                <span className="ml-1.5 rounded bg-teal-500 px-1.5 py-0.5 text-xs font-bold text-navy-900">
+                  {isSuper ? "서비스 관리자" : "기관 관리자"}
+                </span>
               )}
             </span>
             <button
@@ -107,7 +125,7 @@ function Shell({ children }: { children: ReactNode }) {
         </nav>
       </header>
       <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">
-        {adminArea && !isAdmin ? <Forbidden /> : children}
+        {forbidden ? <Forbidden /> : children}
       </main>
       <footer className="no-print border-t border-navy-100 py-4 text-center text-xs text-navy-500">
         public goods manage · 모든 시간은 한국 시간(KST) 기준

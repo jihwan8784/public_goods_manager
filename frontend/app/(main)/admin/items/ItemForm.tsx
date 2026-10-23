@@ -3,13 +3,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useUser } from "@/components/AuthProvider";
 import ItemThumb from "@/components/ItemThumb";
+import OrgPicker from "@/components/OrgPicker";
 import { btn, Card, FlashMessage, inputCls, labelCls, type Flash } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { fmtRange } from "@/lib/time";
-import type { ItemFull, ItemStatus, Reservation } from "@/lib/types";
+import type { ItemAccess, ItemFull, ItemStatus, OrgBrief, Reservation } from "@/lib/types";
 
 type Values = {
+  org_id: number | null;
+  access: ItemAccess;
   asset_code: string;
   name: string;
   category: string;
@@ -19,7 +23,31 @@ type Values = {
   status: ItemStatus;
 };
 
-const EMPTY: Values = { asset_code: "", name: "", category: "", description: "", caution: "", location: "", status: "normal" };
+const EMPTY: Values = {
+  org_id: null,
+  access: "public",
+  asset_code: "",
+  name: "",
+  category: "",
+  description: "",
+  caution: "",
+  location: "",
+  status: "normal",
+};
+
+function toValues(i: ItemFull): Values {
+  return {
+    org_id: i.org_id,
+    access: i.access,
+    asset_code: i.asset_code,
+    name: i.name,
+    category: i.category,
+    description: i.description,
+    caution: i.caution,
+    location: i.location,
+    status: i.status,
+  };
+}
 
 /** 큰 사진은 업로드 전에 브라우저에서 줄인다 (최대 1200px JPEG) */
 async function shrink(file: File): Promise<Blob> {
@@ -47,7 +75,17 @@ export default function ItemForm({
   onSaved?: () => void;
 }) {
   const router = useRouter();
-  const [v, setV] = useState<Values>(item ? { ...item } : EMPTY);
+  const user = useUser();
+  const isSuper = user.role === "admin";
+  const managed = user.managed_orgs;
+  const [v, setV] = useState<Values>(() => {
+    if (item) return toValues(item);
+    const only = managed.length === 1 ? managed[0] : null;
+    return { ...EMPTY, org_id: only?.id ?? null, access: only?.kind === "school" ? "members" : "public" };
+  });
+  const [pickedOrg, setPickedOrg] = useState<(OrgBrief & { address: string }) | null>(
+    item?.org ? { ...item.org, address: "" } : null,
+  );
   const [errors, setErrors] = useState<Partial<Record<keyof Values, string>>>({});
   const [flash, setFlash] = useState<Flash>(null);
   const [saving, setSaving] = useState(false);
@@ -57,8 +95,13 @@ export default function ItemForm({
   const set = (k: keyof Values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setV({ ...v, [k]: e.target.value });
 
+  function chooseOrg(org: OrgBrief | null) {
+    setV({ ...v, org_id: org?.id ?? null, access: org?.kind === "school" ? "members" : "public" });
+  }
+
   function validate(): boolean {
     const e: typeof errors = {};
+    if (!v.org_id) e.org_id = "물품을 관리할 기관을 선택해 주세요.";
     if (!/^[A-Za-z0-9][A-Za-z0-9\-_]{1,39}$/.test(v.asset_code.trim())) e.asset_code = "영문·숫자·-·_ 로 2~40자 (예: MIC-001)";
     if (!v.name.trim()) e.name = "물품명을 입력해 주세요.";
     if (!v.category.trim()) e.category = "카테고리를 입력해 주세요.";
@@ -78,7 +121,7 @@ export default function ItemForm({
       if (item) {
         const res = await api<{ item: ItemFull; affected: Reservation[] }>(`/admin/items/${item.id}`, { method: "PUT", body: v });
         setAffected(res.affected);
-        setV({ ...res.item });
+        setV(toValues(res.item));
         setFlash({ kind: "ok", text: "저장했습니다." });
         onSaved?.();
       } else {
@@ -138,7 +181,7 @@ export default function ItemForm({
   const field = (k: keyof Values, label: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className={labelCls}>
       {label}
-      <input value={v[k]} onChange={set(k)} className={inputCls} aria-invalid={!!errors[k]} aria-describedby={errors[k] ? `${k}-err` : undefined} {...extra} />
+      <input value={String(v[k] ?? "")} onChange={set(k)} className={inputCls} aria-invalid={!!errors[k]} aria-describedby={errors[k] ? `${k}-err` : undefined} {...extra} />
       {errors[k] && <span id={`${k}-err`} className="text-xs font-semibold text-rose-800">{errors[k]}</span>}
     </label>
   );
@@ -148,6 +191,45 @@ export default function ItemForm({
       <Card>
         <form onSubmit={save} className="grid gap-4" noValidate>
           <div className="grid gap-4 sm:grid-cols-2">
+            {isSuper ? (
+              <div className="sm:col-span-2">
+                <OrgPicker
+                  label="관리 기관"
+                  value={pickedOrg}
+                  onChange={(o) => {
+                    setPickedOrg(o);
+                    chooseOrg(o);
+                  }}
+                  invalid={!!errors.org_id}
+                  placeholder="기관 이름으로 검색 (학교·주민센터)"
+                />
+              </div>
+            ) : (
+              <label className={labelCls}>
+                관리 기관
+                <select
+                  value={v.org_id ?? ""}
+                  onChange={(e) => chooseOrg(managed.find((o) => String(o.id) === e.target.value) ?? null)}
+                  className={inputCls}
+                  aria-invalid={!!errors.org_id}
+                >
+                  <option value="">기관 선택</option>
+                  {managed.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className={labelCls}>
+              이용 대상
+              <select value={v.access} onChange={set("access")} className={inputCls}>
+                <option value="public">누구나 (로그인한 모든 회원)</option>
+                <option value="members">소속 학생 전용 (학교 승인 학생만)</option>
+              </select>
+            </label>
+            {errors.org_id && <span className="text-xs font-semibold text-rose-800 sm:col-span-2">{errors.org_id}</span>}
             {field("name", "물품명 (종류)", { placeholder: "예: 무선 마이크", maxLength: 80, required: true })}
             {field("asset_code", "개별 관리번호", { placeholder: "예: MIC-004", maxLength: 40, required: true, className: `${inputCls} font-mono uppercase` })}
             <label className={labelCls}>

@@ -12,6 +12,7 @@ import {
   inputCls,
   ItemBadge,
   labelCls,
+  LiveBadge,
   Loading,
   PageHeader,
   ReservationBadge,
@@ -47,7 +48,7 @@ export default function AdminReservations() {
   const [qInput, setQInput] = useState(q);
   const tabDef = TABS.find((t) => t.key === tab)!;
   const query = [tabDef.query, q ? `q=${encodeURIComponent(q)}` : ""].filter(Boolean).join("&");
-  const list = useLoad<{ reservations: Reservation[] }>(`/admin/reservations?${query}`);
+  const list = useLoad<{ reservations: Reservation[] }>(`/admin/reservations?${query}`, { refreshMs: 15000 });
 
   const [flash, setFlash] = useState<Flash>(null);
   const [affected, setAffected] = useState<Reservation[]>([]);
@@ -131,7 +132,7 @@ export default function AdminReservations() {
             <button
               type="button"
               className={btn.primary}
-              disabled={busy || (r.conflicts?.length ?? 0) > 0 || r.item_blocked}
+              disabled={busy || (r.conflicts?.length ?? 0) > 0 || r.item_blocked || !!r.ineligible_reason}
               onClick={() => act(r, "approve", "승인")}
             >
               승인
@@ -167,6 +168,7 @@ export default function AdminReservations() {
 
   function renderWarnings(r: Reservation) {
     const msgs: { text: string; strong?: boolean }[] = [];
+    if (r.ineligible_reason) msgs.push({ text: `신청자 대여 자격 없음: ${r.ineligible_reason}`, strong: true });
     if (r.item_blocked) msgs.push({ text: "물품이 수리 중이거나 보관 종료되어 승인할 수 없습니다.", strong: true });
     if (r.conflicts?.length) msgs.push({ text: `확정된 예약 #${r.conflicts.join(", #")}과 겹쳐 승인할 수 없습니다.`, strong: true });
     if (r.pending_overlaps?.length) msgs.push({ text: `승인 대기 #${r.pending_overlaps.join(", #")}과 기간이 겹칩니다. 하나만 승인됩니다.` });
@@ -187,7 +189,11 @@ export default function AdminReservations() {
 
   return (
     <>
-      <PageHeader title="예약·대여 관리" desc="승인, 인계(대여 시작), 반납 확인을 순서대로 처리합니다. 승인만으로는 대여가 시작되지 않습니다." />
+      <PageHeader
+        title="예약·대여 관리"
+        desc="관리하는 기관의 예약만 보입니다. 승인, 인계(대여 시작), 반납 확인을 순서대로 처리하세요. 승인만으로는 대여가 시작되지 않습니다."
+        actions={<LiveBadge updatedAt={list.updatedAt} />}
+      />
 
       <nav aria-label="상태별 보기" className="mb-4 flex gap-1 overflow-x-auto pb-1">
         {TABS.map((t) => (
@@ -250,7 +256,10 @@ export default function AdminReservations() {
                     <Link href={`/items/${r.item?.id}`} className="font-bold hover:underline">
                       {r.item?.name} <span className="font-mono text-sm font-normal">{r.item?.asset_code}</span>
                     </Link>
-                    <p className="text-sm text-navy-700">{r.user?.name} · #{r.id}</p>
+                    <p className="text-sm text-navy-700">
+                      {r.user?.name} · #{r.id}
+                      {r.item?.org && ` · ${r.item.org.name}`}
+                    </p>
                   </div>
                   <ReservationBadge status={r.status} overdue={r.overdue} />
                 </div>
@@ -287,6 +296,7 @@ export default function AdminReservations() {
                     <td className="px-3 py-3">
                       <Link href={`/items/${r.item?.id}`} className="font-semibold hover:underline">{r.item?.name}</Link>
                       <div className="font-mono text-xs text-navy-600">{r.item?.asset_code}</div>
+                      {r.item?.org && <div className="text-xs text-navy-600">{r.item.org.name}</div>}
                       {r.item && r.item.status !== "normal" && <div className="mt-1"><ItemBadge status={r.item.status} /></div>}
                     </td>
                     <td className="px-3 py-3">

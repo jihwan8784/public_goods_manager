@@ -1,4 +1,16 @@
-import type { ItemStatus, ReportStatus, ReservationStatus } from "./types";
+import type { ItemStatus, OrgKind, ReportStatus, ReservationStatus } from "./types";
+
+export const ORG_KIND_LABEL: Record<OrgKind, string> = {
+  school: "학교",
+  community_center: "주민센터",
+  other: "기타 기관",
+};
+
+export const ORG_KIND_ICON: Record<OrgKind, string> = {
+  school: "🏫",
+  community_center: "🏛",
+  other: "🏢",
+};
 
 export const RESERVATION_LABEL: Record<ReservationStatus, string> = {
   pending: "승인 대기",

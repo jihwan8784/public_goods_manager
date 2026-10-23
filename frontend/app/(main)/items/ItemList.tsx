@@ -6,9 +6,9 @@ import { useState } from "react";
 import { useUser } from "@/components/AuthProvider";
 import ItemThumb from "@/components/ItemThumb";
 import PeriodFields, { periodError, type Period } from "@/components/PeriodFields";
-import { AvailBadge, btn, Empty, ErrorState, inputCls, ItemBadge, labelCls, Loading, OverdueBadge, PageHeader } from "@/components/ui";
+import { AccessBadge, AvailBadge, btn, Empty, ErrorState, inputCls, ItemBadge, labelCls, LiveBadge, Loading, OverdueBadge, PageHeader } from "@/components/ui";
 import { defaultSlot, fmtDateTime, toIso } from "@/lib/time";
-import type { ItemListRow } from "@/lib/types";
+import type { ItemListRow, OrgFull } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
 
 function RentalState({ row }: { row: ItemListRow }) {
@@ -17,6 +17,15 @@ function RentalState({ row }: { row: ItemListRow }) {
     <span className="inline-flex flex-wrap items-center gap-1 text-sm font-semibold text-navy-800">
       현재 대여 중 · 반납 기한 {row.rented_due && fmtDateTime(row.rented_due)}
       {row.rented_overdue && <OverdueBadge />}
+    </span>
+  );
+}
+
+function Eligibility({ row }: { row: ItemListRow }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <AccessBadge access={row.access} />
+      {!row.eligible && <span className="text-xs font-semibold text-rose-800">{row.eligible_reason}</span>}
     </span>
   );
 }
@@ -35,7 +44,9 @@ export default function ItemList() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const isAdmin = user.role === "admin";
+  const org = params.get("org");
+  const eligibleOnly = params.get("eligible") === "1";
+  const canSeeRetired = user.role === "admin" || (!!org && user.managed_orgs.some((o) => String(o.id) === org));
 
   const q = params.get("q") ?? "";
   const category = params.get("category") ?? "";
@@ -60,6 +71,8 @@ export default function ItemList() {
   const [formError, setFormError] = useState("");
 
   const qs = new URLSearchParams();
+  if (org) qs.set("org", org);
+  if (eligibleOnly) qs.set("eligible_only", "true");
   if (q) qs.set("q", q);
   if (category) qs.set("category", category);
   if (status) qs.set("status", status);
@@ -68,7 +81,8 @@ export default function ItemList() {
     qs.set("end", end);
     if (availableOnly) qs.set("available_only", "true");
   }
-  const list = useLoad<{ items: ItemListRow[] }>(`/items?${qs.toString()}`);
+  const list = useLoad<{ items: ItemListRow[] }>(`/items?${qs.toString()}`, { refreshMs: 20000 });
+  const orgInfo = useLoad<{ org: OrgFull; members_eligible: boolean; members_reason: string | null }>(org ? `/orgs/${org}` : null);
   const cats = useLoad<{ categories: string[] }>("/items/categories");
 
   function apply(e?: React.FormEvent, overrides: Record<string, string | null> = {}) {
@@ -76,6 +90,8 @@ export default function ItemList() {
     setFormError("");
     const next = new URLSearchParams();
     const values: Record<string, string | null> = {
+      org: org || null,
+      eligible: eligibleOnly ? "1" : null,
       q: qInput.trim() || null,
       category: category || null,
       status: status || null,
@@ -100,7 +116,33 @@ export default function ItemList() {
 
   return (
     <>
-      <PageHeader title="물품 찾기" desc="이름이나 관리번호로 찾고, 원하는 사용 기간에 빌릴 수 있는 물품을 확인하세요." />
+      <PageHeader
+        title="물품 찾기"
+        desc="이름이나 관리번호로 찾고, 원하는 사용 기간에 빌릴 수 있는 물품을 확인하세요."
+        actions={
+          <>
+            <LiveBadge updatedAt={list.updatedAt} />
+            <Link href="/map" className={btn.secondary}>
+              🗺 지도에서 기관 고르기
+            </Link>
+          </>
+        }
+      />
+      {org && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-3">
+          <div className="text-sm">
+            <span className="font-bold">{orgInfo.data?.org.name ?? "선택한 기관"}</span>
+            <span className="text-navy-700"> 물품만 보는 중</span>
+            {orgInfo.data?.org.address && <span className="block text-xs text-navy-600">{orgInfo.data.org.address}</span>}
+            {orgInfo.data && !orgInfo.data.members_eligible && orgInfo.data.org.kind === "school" && (
+              <span className="block text-xs text-indigo-900">🎓 소속 학생 전용 물품은 {orgInfo.data.members_reason}</span>
+            )}
+          </div>
+          <button type="button" className={btn.small} onClick={() => apply(undefined, { org: null })}>
+            ✕ 모든 기관 보기
+          </button>
+        </div>
+      )}
 
       <form onSubmit={apply} className="mb-6 grid gap-4 rounded-xl border border-navy-100 bg-white p-4 shadow-sm" role="search">
         <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_auto] md:items-end">
@@ -126,10 +168,10 @@ export default function ItemList() {
           <label className={labelCls}>
             물품 상태
             <select value={status} onChange={(e) => apply(undefined, { status: e.target.value || null })} className={inputCls}>
-              <option value="">{isAdmin ? "보관 종료 제외 전체" : "전체"}</option>
+              <option value="">{canSeeRetired ? "보관 종료 제외 전체" : "전체"}</option>
               <option value="normal">정상</option>
               <option value="repair">수리 중</option>
-              {isAdmin && <option value="retired">보관 종료</option>}
+              {canSeeRetired && <option value="retired">보관 종료</option>}
             </select>
           </label>
           <button type="submit" className={btn.primary}>
@@ -137,6 +179,15 @@ export default function ItemList() {
           </button>
         </div>
 
+        <label className="flex items-center gap-2 text-sm font-semibold text-navy-800">
+          <input
+            type="checkbox"
+            checked={eligibleOnly}
+            onChange={(e) => apply(undefined, { eligible: e.target.checked ? "1" : null })}
+            className="size-4 accent-teal-700"
+          />
+          내가 빌릴 수 있는 물품만 보기
+        </label>
         <div className="rounded-lg bg-navy-50 p-3">
           <label className="flex items-center gap-2 text-sm font-semibold text-navy-800">
             <input type="checkbox" checked={usePeriod} onChange={(e) => setUsePeriod(e.target.checked)} className="size-4 accent-teal-700" />
@@ -204,6 +255,8 @@ export default function ItemList() {
                     <span className="font-mono text-xs text-navy-600">
                       {row.asset_code} · {row.category}
                     </span>
+                    {row.org && <span className="text-xs font-semibold text-navy-700">{row.org.name}</span>}
+                    <Eligibility row={row} />
                     <span className="flex flex-wrap gap-1">
                       <ItemBadge status={row.status} />
                       <PeriodState row={row} />
@@ -221,7 +274,7 @@ export default function ItemList() {
               <thead className="bg-navy-50 text-navy-700">
                 <tr>
                   <th scope="col" className="px-4 py-3">물품</th>
-                  <th scope="col" className="px-4 py-3">카테고리 · 보관 장소</th>
+                  <th scope="col" className="px-4 py-3">기관 · 보관 장소</th>
                   <th scope="col" className="px-4 py-3">상태</th>
                   <th scope="col" className="px-4 py-3">현재 대여</th>
                   {start && end && <th scope="col" className="px-4 py-3">선택 기간</th>}
@@ -241,10 +294,17 @@ export default function ItemList() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-navy-700">
-                      {row.category}
-                      <div className="text-xs text-navy-500">{row.location || "-"}</div>
+                      {row.org?.name ?? "-"}
+                      <div className="text-xs text-navy-500">
+                        {row.category} · {row.location || "-"}
+                      </div>
                     </td>
-                    <td className="px-4 py-3"><ItemBadge status={row.status} /></td>
+                    <td className="px-4 py-3">
+                      <div className="grid justify-items-start gap-1">
+                        <ItemBadge status={row.status} />
+                        <Eligibility row={row} />
+                      </div>
+                    </td>
                     <td className="px-4 py-3"><RentalState row={row} /></td>
                     {start && end && <td className="px-4 py-3"><PeriodState row={row} /></td>}
                     <td className="px-4 py-3 text-right">

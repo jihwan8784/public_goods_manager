@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Index, LargeBinary, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, LargeBinary, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from .timeutil import now_utc
@@ -8,6 +8,16 @@ from .timeutil import now_utc
 # 상태 값
 ROLE_USER, ROLE_ADMIN = "user", "admin"
 ROLES = (ROLE_USER, ROLE_ADMIN)
+
+# 기관 종류
+ORG_SCHOOL, ORG_CENTER, ORG_OTHER = "school", "community_center", "other"
+ORG_KINDS = (ORG_SCHOOL, ORG_CENTER, ORG_OTHER)
+
+# 학생 인증 상태
+STUDENT_NONE, STUDENT_PENDING, STUDENT_APPROVED, STUDENT_REJECTED = "none", "pending", "approved", "rejected"
+
+# 물품 이용 대상: 누구나 / 해당 기관 소속(승인된 학생)만
+ACCESS_PUBLIC, ACCESS_MEMBERS = "public", "members"
 
 ITEM_NORMAL, ITEM_REPAIR, ITEM_RETIRED = "normal", "repair", "retired"
 ITEM_STATUSES = (ITEM_NORMAL, ITEM_REPAIR, ITEM_RETIRED)
@@ -37,6 +47,62 @@ REPORT_STATUSES = (REPORT_RECEIVED, REPORT_IN_PROGRESS, REPORT_RESOLVED, REPORT_
 REPORT_OPEN = (REPORT_RECEIVED, REPORT_IN_PROGRESS)
 
 
+class Organization(SQLModel, table=True):
+    """공공기관(학교·주민센터 등). 공공데이터에서 동기화하거나 직접 등록한다."""
+
+    __tablename__ = "pgm_org"
+    __table_args__ = (UniqueConstraint("kind", "code", name="uq_pgm_org_kind_code"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(max_length=20, index=True)
+    code: str = Field(max_length=60)  # 원본 데이터의 고유 코드 (NEIS 표준학교코드 등)
+    name: str = Field(max_length=120, index=True)
+    subtype: str = Field(default="", max_length=40)  # 초등학교/중학교/고등학교 등
+    region: str = Field(default="", max_length=40)  # 시도
+    address: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=40)
+    lat: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    lng: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    geocode_status: str = Field(default="pending", max_length=10)  # pending | ok | failed | manual
+    source: str = Field(default="manual", max_length=20)  # neis | csv | manual
+    active: bool = Field(default=True, index=True)
+    synced_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+
+
+class OrgAdmin(SQLModel, table=True):
+    """기관 관리자 지정 (한 사용자가 여러 기관을 관리할 수 있음)."""
+
+    __tablename__ = "pgm_org_admin"
+
+    org_id: int = Field(foreign_key="pgm_org.id", primary_key=True)
+    user_id: int = Field(foreign_key="pgm_user.id", primary_key=True, index=True)
+    created_at: datetime = Field(
+        default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+
+
+class SyncRun(SQLModel, table=True):
+    """기관 목록 동기화 기록."""
+
+    __tablename__ = "pgm_sync_run"
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(max_length=30)
+    status: str = Field(default="running", max_length=10)  # running | ok | error
+    message: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    created: int = 0
+    updated: int = 0
+    deactivated: int = 0
+    geocoded: int = 0
+    started_at: datetime = Field(
+        default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    finished_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+
+
 class User(SQLModel, table=True):
     __tablename__ = "pgm_user"
 
@@ -44,7 +110,14 @@ class User(SQLModel, table=True):
     email: str = Field(sa_column=Column(String(120), unique=True, nullable=False, index=True))
     name: str = Field(max_length=50)
     password_hash: str
-    role: str = Field(default=ROLE_USER, max_length=10)
+    role: str = Field(default=ROLE_USER, max_length=10)  # admin = 서비스 전체 관리자
+    is_student: bool = Field(default=False)
+    school_id: int | None = Field(default=None, foreign_key="pgm_org.id", index=True)
+    student_no: str | None = Field(default=None, max_length=40)
+    student_status: str = Field(default=STUDENT_NONE, max_length=10, index=True)
+    student_reject_reason: str | None = Field(default=None, max_length=300)
+    student_reviewed_by: int | None = Field(default=None)
+    student_reviewed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(
         default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -52,9 +125,12 @@ class User(SQLModel, table=True):
 
 class Item(SQLModel, table=True):
     __tablename__ = "pgm_item"
+    __table_args__ = (UniqueConstraint("org_id", "asset_code", name="uq_pgm_item_org_code"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    asset_code: str = Field(sa_column=Column(String(40), unique=True, nullable=False, index=True))
+    org_id: int | None = Field(default=None, foreign_key="pgm_org.id", index=True)
+    access: str = Field(default=ACCESS_PUBLIC, max_length=10)
+    asset_code: str = Field(sa_column=Column(String(40), nullable=False, index=True))
     name: str = Field(max_length=80, index=True)
     category: str = Field(max_length=40, index=True)
     description: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))

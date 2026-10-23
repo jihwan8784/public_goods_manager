@@ -133,7 +133,7 @@ def test_repair_item_blocks_request_approval_and_checkout(clients, item, db):
     b_id = reserve(clients["bob"], item.id, future(10), future(11)).json()["reservation"]["id"]
     assert clients["admin"].post(f"/admin/reservations/{a_id}/approve").status_code == 200
 
-    body = {"asset_code": item.asset_code, "name": item.name, "category": "음향", "status": "repair"}
+    body = {"org_id": item.org_id, "asset_code": item.asset_code, "name": item.name, "category": "음향", "status": "repair"}
     r = clients["admin"].put(f"/admin/items/{item.id}", json=body)
     assert r.status_code == 200
     affected = {x["id"] for x in r.json()["affected"]}
@@ -156,7 +156,7 @@ def test_unreturned_item_blocks_next_checkout(clients, users, item, db):
     assert r.status_code == 409 and "반납 완료되지 않았습니다" in r.json()["detail"]
 
     # 관리자 대시보드에 경고와 연체가 보인다
-    dash = clients["admin"].get("/dashboard").json()
+    dash = clients["admin"].get("/dashboard").json()["staff"]
     assert dash["counts"]["overdue"] == 1
     assert any(a["reservation"]["id"] == nxt_id for a in dash["alerts"])
 

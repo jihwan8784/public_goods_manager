@@ -24,6 +24,9 @@ export const btn = {
     "inline-flex items-center justify-center rounded-md border border-navy-200 bg-white px-2.5 py-1 text-xs font-semibold text-navy-800 hover:bg-navy-50",
 };
 
+// 너비를 따로 지정할 때 쓰는 기본 입력 스타일
+export const inputBase =
+  "rounded-lg border border-navy-200 bg-white px-3 py-2 text-navy-900 placeholder:text-navy-300 focus:border-teal-600 disabled:bg-slate-100";
 export const inputCls =
   "w-full rounded-lg border border-navy-200 bg-white px-3 py-2 text-navy-900 placeholder:text-navy-300 focus:border-teal-600 disabled:bg-slate-100";
 export const labelCls = "grid gap-1 text-sm font-semibold text-navy-700";
@@ -116,7 +119,7 @@ export function Forbidden() {
   return (
     <div role="alert" className="mx-auto max-w-lg rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-950">
       <h1 className="text-lg font-bold">접근 권한이 없습니다</h1>
-      <p className="mt-2 text-sm">이 화면은 관리자만 사용할 수 있습니다. 필요한 경우 관리자에게 문의해 주세요.</p>
+      <p className="mt-2 text-sm">이 화면을 사용할 권한이 없습니다. 기관 관리자 지정이 필요하면 서비스 관리자에게 문의해 주세요.</p>
       <Link href="/" className={`${btn.secondary} mt-4`}>
         홈으로
       </Link>
@@ -167,4 +170,27 @@ export function PageHeader({ title, desc, actions }: { title: string; desc?: str
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-xl border border-navy-100 bg-white p-5 shadow-sm ${className}`}>{children}</section>;
+}
+
+export function LiveBadge({ updatedAt }: { updatedAt: Date | null }) {
+  if (!updatedAt) return null;
+  const t = updatedAt.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-navy-600" aria-live="off">
+      <span className="size-2 rounded-full bg-teal-500" aria-hidden />
+      자동 갱신 중 · {t} 기준
+    </span>
+  );
+}
+
+export function AccessBadge({ access }: { access: "public" | "members" }) {
+  return access === "members" ? (
+    <Pill tone="bg-indigo-50 text-indigo-900 ring-indigo-300">
+      <span aria-hidden>🎓</span>소속 학생 전용
+    </Pill>
+  ) : (
+    <Pill tone="bg-white text-navy-700 ring-navy-200">
+      <span aria-hidden>👥</span>누구나
+    </Pill>
+  );
 }

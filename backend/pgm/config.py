@@ -46,3 +46,8 @@ MAX_ADVANCE_DAYS = 180             # 몇 일 뒤까지 예약 가능한지
 CHECKOUT_EARLY_MINUTES = 30        # 예약 시작 몇 분 전부터 인계 가능한지
 PAST_TOLERANCE_SECONDS = 60        # 요청 지연을 고려한 과거 시각 허용 오차
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
+
+# 공공데이터 / 지도
+NEIS_API_KEY = os.getenv("NEIS_API_KEY", "")  # 교육청 학교 목록 (open.neis.go.kr)
+KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")  # 주소 → 좌표 변환 (서버 전용)
+CRON_SECRET = os.getenv("CRON_SECRET", "")  # Vercel Cron 이 보내는 인증 값

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, errorMessage } from "@/lib/api";
@@ -77,6 +78,12 @@ export default function LoginForm() {
         <button type="submit" disabled={busy} className={btn.primary}>
           {busy ? "로그인 중…" : "로그인"}
         </button>
+        <p className="text-center text-sm text-navy-700">
+          처음 오셨나요?{" "}
+          <Link href="/signup" className="font-semibold text-teal-800 underline">
+            회원가입
+          </Link>
+        </p>
         {params.get("next") && (
           <p className="text-center text-xs text-navy-600">로그인하면 요청한 화면으로 이동합니다.</p>
         )}
@@ -87,13 +94,22 @@ export default function LoginForm() {
           <p className="mt-1 text-xs text-navy-600">개발 환경 시연 데이터에만 있는 가상 계정입니다.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className={btn.small} onClick={() => fill("admin@pgm.test", "admin1234!")}>
-              관리자로 채우기
+              서비스 관리자
+            </button>
+            <button type="button" className={btn.small} onClick={() => fill("gaon.admin@pgm.test", "admin1234!")}>
+              가온고 관리자
+            </button>
+            <button type="button" className={btn.small} onClick={() => fill("center.admin@pgm.test", "admin1234!")}>
+              주민센터 관리자
             </button>
             <button type="button" className={btn.small} onClick={() => fill("student1@pgm.test", "user1234!")}>
-              일반 사용자(김하늘)
+              가온고 학생(김하늘)
             </button>
-            <button type="button" className={btn.small} onClick={() => fill("student2@pgm.test", "user1234!")}>
-              일반 사용자(이바다)
+            <button type="button" className={btn.small} onClick={() => fill("student3@pgm.test", "user1234!")}>
+              승인 대기 학생(박솔)
+            </button>
+            <button type="button" className={btn.small} onClick={() => fill("resident@pgm.test", "user1234!")}>
+              주민(한결)
             </button>
           </div>
         </section>

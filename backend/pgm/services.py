@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from . import config
+from .access import can_manage, eligibility
 from .models import (
     COND_NEEDS_REPAIR,
     COND_NORMAL,
@@ -32,10 +33,10 @@ from .models import (
     REPORT_OPEN,
     REPORT_RECEIVED,
     REPORT_STATUSES,
-    ROLE_ADMIN,
     UNRETURNED,
     DamageReport,
     Item,
+    Organization,
     Reservation,
     User,
 )
@@ -165,6 +166,9 @@ def create_reservation(
     item = session.get(Item, item_id)
     if not item:
         raise _not_found("물품")
+    ok, reason = eligibility(user, item, session.get(Organization, item.org_id) if item.org_id else None)
+    if not ok:
+        raise RuleError(403, reason or "이 물품을 빌릴 자격이 없습니다.")
     avail = check_availability(session, item, start, end)
     if not avail.available:
         raise RuleError(409, avail.reason or "예약할 수 없는 기간입니다.")
@@ -191,6 +195,12 @@ def _lock_item(session: Session, item_id: int) -> Item:
     return item
 
 
+def _ensure_manager(session: Session, actor: User, item: Item) -> None:
+    if not can_manage(session, actor, item.org_id):
+        session.rollback()
+        raise RuleError(403, "이 기관의 관리자만 처리할 수 있습니다.")
+
+
 def _touch(r: Reservation) -> None:
     r.updated_at = now_utc()
 
@@ -207,13 +217,16 @@ def _commit(session: Session) -> None:
 
 def cancel_reservation(session: Session, actor: User, reservation_id: int, reason: str | None) -> Reservation:
     r = _lock_reservation(session, reservation_id)
-    is_admin = actor.role == ROLE_ADMIN
-    if r.user_id != actor.id and not is_admin:
-        raise _not_found()  # 다른 사람 예약의 존재 여부를 알리지 않는다
+    is_owner = r.user_id == actor.id
+    if not is_owner:
+        item = session.get(Item, r.item_id)
+        if not can_manage(session, actor, item.org_id if item else None):
+            session.rollback()
+            raise _not_found()  # 다른 사람 예약의 존재 여부를 알리지 않는다
     if r.status not in (R_PENDING, R_APPROVED):
         session.rollback()
         raise _bad_state(r, "취소")
-    if is_admin and r.user_id != actor.id and not (reason and reason.strip()):
+    if not is_owner and not (reason and reason.strip()):
         session.rollback()
         raise RuleError(422, "관리자가 취소할 때는 사유를 입력해 주세요.")
     r.status = R_CANCELLED
@@ -234,6 +247,12 @@ def approve_reservation(session: Session, admin: User, reservation_id: int) -> R
         session.rollback()
         raise _bad_state(r, "승인")
     item = _lock_item(session, r.item_id)  # 같은 물품의 승인을 직렬화
+    _ensure_manager(session, admin, item)
+    borrower = session.get(User, r.user_id)
+    ok, reason = eligibility(borrower, item, session.get(Organization, item.org_id) if item.org_id else None)
+    if not ok:
+        session.rollback()
+        raise RuleError(409, f"신청자가 대여 자격이 없습니다: {reason}")
     if item.status == ITEM_REPAIR:
         session.rollback()
         raise RuleError(409, "수리 중인 물품은 예약을 승인할 수 없습니다.")
@@ -265,6 +284,7 @@ def reject_reservation(session: Session, admin: User, reservation_id: int, reaso
     if not reason:
         raise RuleError(422, "거절 사유를 입력해 주세요.")
     r = _lock_reservation(session, reservation_id)
+    _ensure_manager(session, admin, session.get(Item, r.item_id))
     if r.status != R_PENDING:
         session.rollback()
         raise _bad_state(r, "거절")
@@ -306,6 +326,7 @@ def checkout_reservation(session: Session, admin: User, reservation_id: int) -> 
         session.rollback()
         raise _bad_state(r, "대여 시작")
     item = _lock_item(session, r.item_id)
+    _ensure_manager(session, admin, item)
     blockers = checkout_blockers(session, r, item)
     if blockers:
         session.rollback()
@@ -353,6 +374,7 @@ def complete_return(
         raise RuleError(422, "반납 상태(정상/수리 필요)를 선택해 주세요.")
     note = (note or "").strip()[:300] or None
     r = _lock_reservation(session, reservation_id)
+    _ensure_manager(session, admin, session.get(Item, r.item_id))
     if r.status == R_RETURNED:
         session.rollback()
         raise RuleError(409, "이미 반납 완료된 대여입니다.")
@@ -403,7 +425,7 @@ def create_report(
         raise _not_found("물품")
     if reservation_id is not None:
         r = session.get(Reservation, reservation_id)
-        if not r or (r.user_id != user.id and user.role != ROLE_ADMIN) or r.item_id != item_id:
+        if not r or r.item_id != item_id or (r.user_id != user.id and not can_manage(session, user, item.org_id)):
             raise RuleError(422, "연결할 수 없는 예약입니다.")
     report = DamageReport(
         item_id=item_id, reporter_id=user.id, reservation_id=reservation_id, description=description[:2000]
@@ -442,6 +464,7 @@ def update_report(
     ).first()
     if not report:
         raise _not_found("고장 신고")
+    _ensure_manager(session, admin, session.get(Item, report.item_id))
     if status == REPORT_RECEIVED and report.status != REPORT_RECEIVED:
         session.rollback()
         raise RuleError(409, "처리를 시작한 신고는 접수 상태로 되돌릴 수 없습니다.")

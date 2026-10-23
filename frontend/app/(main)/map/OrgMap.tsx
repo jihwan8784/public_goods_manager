@@ -1,0 +1,171 @@
+"use client";
+
+import Link from "next/link";
+import { useRef, useState } from "react";
+import { useUser } from "@/components/AuthProvider";
+import KakaoMap, { KAKAO_KEY, type Bounds } from "@/components/KakaoMap";
+import { btn, Empty, ErrorState, inputBase, LiveBadge, Loading, PageHeader } from "@/components/ui";
+import { ORG_KIND_ICON, ORG_KIND_LABEL } from "@/lib/labels";
+import type { MapOrg, OrgKind } from "@/lib/types";
+import { useLoad } from "@/lib/useLoad";
+
+// 지도를 쓸 수 없을 때는 전국 범위의 목록으로 보여 준다
+const KOREA: Bounds = { sw_lat: 33, sw_lng: 124, ne_lat: 39, ne_lng: 132 };
+
+export default function OrgMap() {
+  const user = useUser();
+  const [mapError, setMapError] = useState(KAKAO_KEY ? "" : "지도 키(NEXT_PUBLIC_KAKAO_MAP_KEY)가 설정되지 않아 목록으로 보여 줍니다.");
+  const useMap = !mapError;
+  const [bounds, setBounds] = useState<Bounds | null>(useMap ? null : KOREA);
+  const [kind, setKind] = useState<"" | OrgKind>("");
+  const [withItems, setWithItems] = useState(true);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [focus, setFocus] = useState<{ lat: number; lng: number; level?: number; key: number } | null>(null);
+  const [geoMsg, setGeoMsg] = useState("");
+  const focusSeq = useRef(0);
+
+  const b = useMap ? bounds : KOREA;
+  const qs = b
+    ? new URLSearchParams({
+        sw_lat: String(b.sw_lat),
+        sw_lng: String(b.sw_lng),
+        ne_lat: String(b.ne_lat),
+        ne_lng: String(b.ne_lng),
+        with_items: String(withItems),
+        ...(kind ? { kind } : {}),
+      })
+    : null;
+  const { data, error, loading, reload, updatedAt } = useLoad<{ orgs: MapOrg[]; total: number; truncated: boolean }>(
+    qs ? `/orgs/map?${qs}` : null,
+    { refreshMs: 15000 },
+  );
+  const orgs = data?.orgs ?? [];
+  const sorted = [...orgs].sort((a, b) => Number(b.my_school) - Number(a.my_school) || b.available_now - a.available_now);
+  const selected = orgs.find((o) => o.id === selectedId) ?? null;
+
+  function locate() {
+    setGeoMsg("");
+    if (!navigator.geolocation) return setGeoMsg("이 브라우저는 위치 확인을 지원하지 않습니다.");
+    navigator.geolocation.getCurrentPosition(
+      (p) => setFocus({ lat: p.coords.latitude, lng: p.coords.longitude, level: 5, key: ++focusSeq.current }),
+      () => setGeoMsg("위치 권한이 없어 현재 위치로 이동하지 못했습니다."),
+      { timeout: 8000 },
+    );
+  }
+
+  function pick(o: MapOrg) {
+    setSelectedId(o.id);
+    if (useMap) setFocus({ lat: o.lat, lng: o.lng, key: ++focusSeq.current });
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="지도에서 기관 찾기"
+        desc="학교·주민센터를 지도에서 고르고, 그 기관에서 빌릴 수 있는 물품을 확인하세요. 표시: 지금 빌릴 수 있는 수 / 전체 물품 수"
+        actions={<LiveBadge updatedAt={updatedAt} />}
+      />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor="map-kind">기관 종류</label>
+        <select id="map-kind" value={kind} onChange={(e) => setKind(e.target.value as OrgKind | "")} className={`${inputBase} w-40`}>
+          <option value="">모든 기관</option>
+          <option value="school">학교</option>
+          <option value="community_center">주민센터</option>
+        </select>
+        <label className="flex items-center gap-2 text-sm font-semibold text-navy-800">
+          <input type="checkbox" checked={withItems} onChange={(e) => setWithItems(e.target.checked)} className="size-4 accent-teal-700" />
+          물품이 등록된 기관만
+        </label>
+        {useMap && (
+          <button type="button" className={btn.secondary} onClick={locate}>
+            📍 내 위치
+          </button>
+        )}
+        {user.student.status === "approved" && user.student.school && (
+          <Link href={`/items?org=${user.student.school.id}`} className={btn.secondary}>
+            🏫 우리 학교 물품
+          </Link>
+        )}
+      </div>
+      {geoMsg && <p role="alert" className="mb-2 text-sm font-semibold text-rose-800">{geoMsg}</p>}
+      {mapError && (
+        <p role="status" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {mapError}
+        </p>
+      )}
+
+      <div className={`grid gap-4 ${useMap ? "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : ""}`}>
+        {useMap && (
+          <div className="h-[55vh] min-h-80 overflow-hidden rounded-xl border border-navy-100 bg-navy-50 shadow-sm lg:h-[70vh]">
+            <KakaoMap orgs={orgs} selectedId={selectedId} onSelect={setSelectedId} onBounds={setBounds} focus={focus} onError={setMapError} />
+          </div>
+        )}
+        <div className="grid content-start gap-3">
+          {selected && (
+            <section className="rounded-xl border-2 border-navy-900 bg-white p-4 shadow-sm" aria-live="polite">
+              <p className="text-xs font-semibold text-navy-600">
+                {ORG_KIND_ICON[selected.kind]} {ORG_KIND_LABEL[selected.kind]} {selected.subtype && `· ${selected.subtype}`}
+              </p>
+              <h2 className="text-lg font-bold">{selected.name}</h2>
+              <p className="text-sm text-navy-700">{selected.address}</p>
+              <p className="mt-2 text-sm">
+                지금 빌릴 수 있는 물품 <strong className="text-teal-800">{selected.available_now}개</strong> / 전체 {selected.items}개
+              </p>
+              {selected.members_only > 0 && (
+                <p className="mt-1 text-xs text-indigo-900">
+                  🎓 {selected.members_only}개는 이 학교 승인 학생 전용입니다{selected.my_school ? " (우리 학교)" : ""}.
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <Link href={`/items?org=${selected.id}`} className={btn.primary}>
+                  이 기관 물품 보기
+                </Link>
+                <button type="button" className={btn.secondary} onClick={() => setSelectedId(null)}>
+                  닫기
+                </button>
+              </div>
+            </section>
+          )}
+          {loading && !data ? (
+            <Loading label={useMap && !bounds ? "지도를 불러오는 중…" : "기관을 찾는 중…"} />
+          ) : error ? (
+            <ErrorState message={error} onRetry={reload} />
+          ) : orgs.length === 0 ? (
+            <Empty title={useMap ? "이 지도 범위에 표시할 기관이 없습니다." : "물품이 등록된 기관이 아직 없습니다."}>
+              {useMap && "지도를 축소하거나 다른 지역으로 이동해 보세요."}
+            </Empty>
+          ) : (
+            <section className="rounded-xl border border-navy-100 bg-white shadow-sm">
+              <h2 className="border-b border-navy-100 px-4 py-2.5 text-sm font-bold">
+                {useMap ? "지도 범위 안" : "전국"} 기관 {data?.total ?? orgs.length}곳
+                {data?.truncated && <span className="ml-1 font-normal text-navy-600">(일부만 표시 — 지도를 확대하세요)</span>}
+              </h2>
+              <ul className="max-h-[60vh] divide-y divide-navy-50 overflow-y-auto">
+                {sorted.map((o) => (
+                  <li key={o.id}>
+                    <button
+                      type="button"
+                      onClick={() => pick(o)}
+                      aria-pressed={o.id === selectedId}
+                      className={`flex w-full items-start justify-between gap-2 px-4 py-2.5 text-left text-sm hover:bg-navy-50 ${o.id === selectedId ? "bg-teal-50" : ""}`}
+                    >
+                      <span>
+                        <span aria-hidden>{ORG_KIND_ICON[o.kind]} </span>
+                        <span className="font-semibold">{o.name}</span>
+                        {o.my_school && <span className="ml-1 rounded bg-indigo-100 px-1 text-xs font-bold text-indigo-900">우리 학교</span>}
+                        <span className="block text-xs text-navy-600">{o.address}</span>
+                      </span>
+                      <span className={`shrink-0 text-xs font-bold ${o.available_now ? "text-teal-800" : "text-slate-500"}`}>
+                        {o.available_now}/{o.items}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

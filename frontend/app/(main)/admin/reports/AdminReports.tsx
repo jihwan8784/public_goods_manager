@@ -94,7 +94,7 @@ function ReportCard({ report, onSaved }: { report: Report; onSaved: () => void }
             {item?.name} <span className="font-mono text-sm font-normal">{item?.asset_code}</span>
           </Link>
           <p className="text-xs text-navy-600">
-            #{report.id} · {report.reporter?.name} · {fmtDateTime(report.created_at)}
+            {item?.org && `${item.org.name} · `}#{report.id} · {report.reporter?.name} · {fmtDateTime(report.created_at)}
             {report.reservation_id && ` · 예약 #${report.reservation_id}`}
           </p>
         </div>

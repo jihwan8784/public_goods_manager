@@ -10,7 +10,9 @@ from sqlmodel import Session, select
 from . import config
 from .db import engine, init_db
 from .models import ROLE_ADMIN, User
+from .people import router as people_router
 from .routes import router
+from .routes_orgs import router as orgs_router
 from .security import hash_password
 from .services import RuleError
 
@@ -26,6 +28,12 @@ FIELD_LABELS = {
     "description": "설명",
     "reason": "사유",
     "condition": "반납 상태",
+    "school_id": "학교",
+    "student_no": "학번",
+    "org_id": "기관",
+    "access": "이용 대상",
+    "lat": "위도",
+    "lng": "경도",
 }
 
 
@@ -103,6 +111,8 @@ def create_app(run_startup: bool = True) -> FastAPI:
         return {"service": "public goods manage", "status": "ok"}
 
     app.include_router(router)
+    app.include_router(people_router)
+    app.include_router(orgs_router)
     return app
 
 

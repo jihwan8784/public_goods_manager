@@ -2,15 +2,21 @@
 
 import Link from "next/link";
 import { useUser } from "@/components/AuthProvider";
-import { btn, Card, Empty, ErrorState, Loading, OverdueBadge, PageHeader, ReservationBadge } from "@/components/ui";
+import { btn, Card, Empty, ErrorState, LiveBadge, Loading, OverdueBadge, PageHeader, ReservationBadge } from "@/components/ui";
 import { dueText, fmtDateTime, fmtRange } from "@/lib/time";
 import type { Reservation } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
 
-type UserDash = { role: "user"; renting: Reservation[]; upcoming: Reservation[]; recent: Reservation[] };
+type UserDash = { renting: Reservation[]; upcoming: Reservation[]; recent: Reservation[] };
 type AdminDash = {
-  role: "admin";
-  counts: { in_use: number; pending: number; overdue: number; return_requested: number; open_reports: number };
+  counts: {
+    in_use: number;
+    pending: number;
+    overdue: number;
+    return_requested: number;
+    open_reports: number;
+    pending_students: number;
+  };
   overdue: Reservation[];
   handovers: Reservation[];
   alerts: { reservation: Reservation; blockers: string[] }[];
@@ -18,11 +24,35 @@ type AdminDash = {
 
 export default function Dashboard() {
   const user = useUser();
-  const { data, error, loading, reload } = useLoad<UserDash | AdminDash>("/dashboard");
+  const { data, error, loading, reload, updatedAt } = useLoad<UserDash & { staff: AdminDash | null }>("/dashboard", {
+    refreshMs: 15000,
+  });
   if (loading && !data) return <Loading />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (!data) return null;
-  return data.role === "admin" ? <AdminHome d={data} name={user.name} /> : <UserHome d={data} name={user.name} />;
+  const st = user.student;
+  return (
+    <>
+      <div className="mb-2 flex justify-end">
+        <LiveBadge updatedAt={updatedAt} />
+      </div>
+      {st.is_student && st.status !== "approved" && (
+        <div role="status" className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+          🎓 {st.school?.name} 학생 인증이 <strong>{st.status_label}</strong> 상태입니다.{" "}
+          {st.status === "pending"
+            ? "학교 관리자가 승인하면 학교 물품을 빌릴 수 있어요. 그동안 누구나 빌릴 수 있는 물품은 이용할 수 있습니다."
+            : "내 정보에서 다시 신청해 주세요."}{" "}
+          <Link href="/me/profile" className="font-semibold underline">
+            내 정보
+          </Link>
+        </div>
+      )}
+      {data.staff && <AdminHome d={data.staff} name={user.name} orgs={user.role === "admin" ? "모든 기관" : user.managed_orgs.map((o) => o.name).join(", ")} />}
+      <div className={data.staff ? "mt-10" : ""}>
+        <UserHome d={data} name={user.name} compact={!!data.staff} />
+      </div>
+    </>
+  );
 }
 
 function ItemLine({ r }: { r: Reservation }) {
@@ -33,15 +63,18 @@ function ItemLine({ r }: { r: Reservation }) {
   );
 }
 
-function UserHome({ d, name }: { d: UserDash; name: string }) {
+function UserHome({ d, name, compact }: { d: UserDash; name: string; compact?: boolean }) {
   return (
     <>
       <PageHeader
-        title={`${name}님, 안녕하세요`}
+        title={compact ? "나의 대여" : `${name}님, 안녕하세요`}
         desc="빌린 물품의 반납 기한과 예정된 예약을 확인하세요."
         actions={
           <>
-            <Link href="/items" className={btn.primary}>
+            <Link href="/map" className={btn.primary}>
+              🗺 지도에서 찾기
+            </Link>
+            <Link href="/items" className={btn.secondary}>
               물품 찾아 예약하기
             </Link>
             <Link href="/me" className={btn.secondary}>
@@ -130,13 +163,13 @@ function Stat({ label, value, href, tone }: { label: string; value: number; href
   );
 }
 
-function AdminHome({ d, name }: { d: AdminDash; name: string }) {
+function AdminHome({ d, name, orgs }: { d: AdminDash; name: string; orgs: string }) {
   const c = d.counts;
   return (
     <>
       <PageHeader
         title="관리자 대시보드"
-        desc={`${name}님, 처리해야 할 일을 확인하세요.`}
+        desc={`${name}님, 처리해야 할 일을 확인하세요. 관리 범위: ${orgs}`}
         actions={
           <>
             <Link href="/admin/reservations?tab=pending" className={btn.primary}>
@@ -148,12 +181,13 @@ function AdminHome({ d, name }: { d: AdminDash; name: string }) {
           </>
         }
       />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Stat label="현재 대여 중" value={c.in_use} href="/admin/reservations?tab=renting" tone="border-navy-100" />
         <Stat label="승인 대기" value={c.pending} href="/admin/reservations?tab=pending" tone={c.pending ? "border-amber-300" : "border-navy-100"} />
         <Stat label="연체" value={c.overdue} href="/admin/reservations?tab=overdue" tone={c.overdue ? "border-rose-400 text-rose-800" : "border-navy-100"} />
         <Stat label="반납 확인 대기" value={c.return_requested} href="/admin/reservations?tab=return_requested" tone={c.return_requested ? "border-violet-300" : "border-navy-100"} />
         <Stat label="미처리 고장 신고" value={c.open_reports} href="/admin/reports" tone={c.open_reports ? "border-orange-300" : "border-navy-100"} />
+        <Stat label="학생 승인 대기" value={c.pending_students} href="/admin/students" tone={c.pending_students ? "border-indigo-300" : "border-navy-100"} />
       </div>
 
       {d.alerts.length > 0 && (

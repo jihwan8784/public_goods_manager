@@ -15,7 +15,8 @@ from sqlmodel import Session  # noqa: E402
 
 from pgm.app import create_app  # noqa: E402
 from pgm.db import engine, init_db  # noqa: E402
-from pgm.models import Item, User  # noqa: E402
+from pgm.models import Item, Organization, OrgAdmin, User  # noqa: E402
+from sqlmodel import select  # noqa: E402
 from pgm.security import hash_password  # noqa: E402
 from pgm.timeutil import now_utc  # noqa: E402
 
@@ -32,7 +33,10 @@ def _schema():
 def clean_db():
     with engine.begin() as conn:
         conn.execute(
-            text("TRUNCATE pgm_damage_report, pgm_reservation, pgm_item, pgm_user RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE pgm_damage_report, pgm_reservation, pgm_item, pgm_org_admin, pgm_user, "
+                "pgm_sync_run, pgm_org RESTART IDENTITY CASCADE"
+            )
         )
     yield
 
@@ -51,8 +55,25 @@ def make_user(db, email, role="user", name=None):
     return u
 
 
-def make_item(db, code="MIC-001", name="무선 마이크", status="normal"):
-    i = Item(asset_code=code, name=name, category="음향", status=status)
+def make_org(db, code="org-a", name="가온고등학교", kind="school", lat=37.55, lng=126.92):
+    o = db.exec(select(Organization).where(Organization.code == code)).first()
+    if o:
+        return o
+    o = Organization(kind=kind, code=code, name=name, lat=lat, lng=lng, geocode_status="manual")
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return o
+
+
+def make_org_admin(db, org, user):
+    db.add(OrgAdmin(org_id=org.id, user_id=user.id))
+    db.commit()
+
+
+def make_item(db, code="MIC-001", name="무선 마이크", status="normal", org=None, access="public"):
+    org = org or make_org(db, "org-default", "기본 기관", "other")
+    i = Item(org_id=org.id, access=access, asset_code=code, name=name, category="음향", status=status)
     db.add(i)
     db.commit()
     db.refresh(i)

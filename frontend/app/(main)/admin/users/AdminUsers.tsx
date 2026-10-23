@@ -4,12 +4,25 @@ import { useState } from "react";
 import { useUser } from "@/components/AuthProvider";
 import { btn, Card, ErrorState, FlashMessage, inputCls, labelCls, Loading, PageHeader, type Flash } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import type { Role, User } from "@/lib/types";
+import type { OrgBrief, Role } from "@/lib/types";
+
+type User = {
+  id: number;
+  email: string;
+  name: string;
+  role: Role;
+  is_student: boolean;
+  student_status: string;
+  school: OrgBrief | null;
+  managed_orgs: OrgBrief[];
+};
 import { useLoad } from "@/lib/useLoad";
 
 export default function AdminUsers() {
   const me = useUser();
-  const list = useLoad<{ users: User[] }>("/admin/users");
+  const [q, setQ] = useState("");
+  const [applied, setApplied] = useState("");
+  const list = useLoad<{ users: User[] }>(`/admin/users${applied ? `?q=${encodeURIComponent(applied)}` : ""}`);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: "user" as Role });
   const [flash, setFlash] = useState<Flash>(null);
   const [saving, setSaving] = useState(false);
@@ -37,7 +50,7 @@ export default function AdminUsers() {
     setFlash(null);
     try {
       await api(`/admin/users/${u.id}`, { method: "PATCH", body: { role } });
-      setFlash({ kind: "ok", text: `${u.name}님의 권한을 ${role === "admin" ? "관리자" : "일반 사용자"}로 바꿨습니다.` });
+      setFlash({ kind: "ok", text: `${u.name}님의 권한을 ${role === "admin" ? "서비스 관리자" : "일반 회원"}로 바꿨습니다.` });
       list.reload();
     } catch (err) {
       setFlash({ kind: "error", text: errorMessage(err) });
@@ -58,13 +71,28 @@ export default function AdminUsers() {
 
   return (
     <>
-      <PageHeader title="회원 관리" desc="조직 구성원 계정을 만들고 권한을 관리합니다." />
+      <PageHeader
+        title="회원 관리"
+        desc="회원은 스스로 가입할 수 있습니다. 여기서는 계정을 직접 만들거나 서비스 관리자 권한을 바꿉니다. 기관 관리자 지정은 '기관' 메뉴에서 합니다."
+      />
       <div className="mb-4">
         <FlashMessage flash={flash} onClose={() => setFlash(null)} />
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <Card>
           <h2 className="font-bold">계정 목록</h2>
+          <form
+            role="search"
+            className="mt-2 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setApplied(q.trim());
+            }}
+          >
+            <label className="sr-only" htmlFor="user-q">이름 또는 이메일 검색</label>
+            <input id="user-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 또는 이메일" className={inputCls} />
+            <button type="submit" className={btn.secondary}>검색</button>
+          </form>
           {list.loading && !list.data ? (
             <Loading />
           ) : list.error ? (
@@ -75,14 +103,22 @@ export default function AdminUsers() {
                 <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
                   <span>
                     <span className="font-semibold">{u.name}</span>
-                    {u.role === "admin" && <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-xs font-bold text-teal-900">관리자</span>}
+                    {u.role === "admin" && <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-xs font-bold text-teal-900">서비스 관리자</span>}
                     <span className="block text-xs text-navy-600">{u.email}</span>
+                    {u.school && (
+                      <span className="block text-xs text-indigo-900">
+                        🎓 {u.school.name} ({u.student_status === "approved" ? "승인" : u.student_status === "pending" ? "승인 대기" : "거절"})
+                      </span>
+                    )}
+                    {u.managed_orgs.length > 0 && (
+                      <span className="block text-xs text-teal-900">관리: {u.managed_orgs.map((o) => o.name).join(", ")}</span>
+                    )}
                   </span>
                   <span className="flex flex-wrap gap-1.5">
                     <button type="button" className={btn.small} onClick={() => resetPassword(u)}>비밀번호 변경</button>
                     {u.id !== me.id && (
                       <button type="button" className={btn.small} onClick={() => changeRole(u, u.role === "admin" ? "user" : "admin")}>
-                        {u.role === "admin" ? "관리자 해제" : "관리자 지정"}
+                        {u.role === "admin" ? "서비스 관리자 해제" : "서비스 관리자 지정"}
                       </button>
                     )}
                   </span>
@@ -110,7 +146,7 @@ export default function AdminUsers() {
               권한
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })} className={inputCls}>
                 <option value="user">일반 사용자</option>
-                <option value="admin">관리자</option>
+                <option value="admin">서비스 관리자</option>
               </select>
             </label>
             <button type="submit" disabled={saving} className={btn.primary}>{saving ? "만드는 중…" : "계정 만들기"}</button>

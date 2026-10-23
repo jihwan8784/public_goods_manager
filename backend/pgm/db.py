@@ -46,6 +46,7 @@ def init_db(eng=None) -> None:
         ).first()
         if not exists:
             conn.execute(text(_OVERLAP_DDL))
+        _migrate_v2(conn)
         exists = conn.execute(
             text("SELECT 1 FROM pg_constraint WHERE conname = 'pgm_reservation_time_order'")
         ).first()
@@ -61,3 +62,57 @@ def init_db(eng=None) -> None:
 def get_session() -> Iterator[Session]:
     with Session(engine) as session:
         yield session
+
+
+# 1차 버전(단일 조직)으로 만든 DB를 여러 기관 구조로 올린다. 여러 번 실행해도 안전하다.
+_V2_COLUMNS = [
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS is_student BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS school_id INTEGER REFERENCES pgm_org(id)",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS student_no VARCHAR(40)",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS student_status VARCHAR(10) NOT NULL DEFAULT 'none'",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS student_reject_reason VARCHAR(300)",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS student_reviewed_by INTEGER",
+    "ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS student_reviewed_at TIMESTAMPTZ",
+    "ALTER TABLE pgm_item ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES pgm_org(id)",
+    "ALTER TABLE pgm_item ADD COLUMN IF NOT EXISTS access VARCHAR(10) NOT NULL DEFAULT 'public'",
+    "CREATE INDEX IF NOT EXISTS ix_pgm_item_org_id ON pgm_item (org_id)",
+    "CREATE INDEX IF NOT EXISTS ix_pgm_user_school_id ON pgm_user (school_id)",
+    "CREATE INDEX IF NOT EXISTS ix_pgm_org_geo ON pgm_org (lat, lng)",
+]
+
+
+def _migrate_v2(conn) -> None:
+    for ddl in _V2_COLUMNS:
+        conn.execute(text(ddl))
+    # 관리번호: 전체 고유 → 기관별 고유
+    old_unique = conn.execute(
+        text(
+            "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_pgm_item_asset_code' "
+            "AND indexdef LIKE 'CREATE UNIQUE%'"
+        )
+    ).first()
+    if old_unique:
+        conn.execute(text("DROP INDEX ix_pgm_item_asset_code"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_pgm_item_asset_code ON pgm_item (asset_code)"))
+    has_uq = conn.execute(text("SELECT 1 FROM pg_constraint WHERE conname = 'uq_pgm_item_org_code'")).first()
+    if not has_uq:
+        conn.execute(text("ALTER TABLE pgm_item ADD CONSTRAINT uq_pgm_item_org_code UNIQUE (org_id, asset_code)"))
+    # 기관이 없던 기존 물품은 '기본 기관'으로 옮긴다
+    orphan = conn.execute(text("SELECT 1 FROM pgm_item WHERE org_id IS NULL LIMIT 1")).first()
+    if orphan:
+        org_id = conn.execute(
+            text(
+                "INSERT INTO pgm_org (kind, code, name, subtype, region, address, phone, geocode_status, source, active, created_at) "
+                "VALUES ('other', 'default', '기본 기관', '', '', '', '', 'pending', 'manual', TRUE, now()) "
+                "ON CONFLICT (kind, code) DO UPDATE SET name = pgm_org.name RETURNING id"
+            )
+        ).scalar_one()
+        conn.execute(text("UPDATE pgm_item SET org_id = :o WHERE org_id IS NULL"), {"o": org_id})
+        # 기존 관리자들은 기본 기관의 관리자도 맡는다
+        conn.execute(
+            text(
+                "INSERT INTO pgm_org_admin (org_id, user_id, created_at) "
+                "SELECT :o, id, now() FROM pgm_user WHERE role = 'admin' ON CONFLICT DO NOTHING"
+            ),
+            {"o": org_id},
+        )

@@ -1,26 +1,48 @@
 @import "tailwindcss";
 
+@theme {
+  --color-navy-50: #f2f5fa;
+  --color-navy-100: #e1e8f2;
+  --color-navy-200: #c3d0e3;
+  --color-navy-300: #94a8c6;
+  --color-navy-500: #4a6188;
+  --color-navy-600: #34496d;
+  --color-navy-700: #243656;
+  --color-navy-800: #172742;
+  --color-navy-900: #0d1b33;
+  --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #f6f8fb;
+  color: var(--color-navy-900);
+  font-family: var(--font-sans);
+  word-break: keep-all;
+}
+
+/* 키보드 사용자를 위한 뚜렷한 포커스 표시 */
+:focus-visible {
+  outline: 3px solid #0d9488;
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(13 27 51 / 0.45);
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+  .print-break-avoid {
+    break-inside: avoid;
+  }
 }

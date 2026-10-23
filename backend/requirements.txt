@@ -3,3 +3,7 @@ uvicorn
 sqlmodel
 psycopg2-binary
 python-dotenv
+bcrypt
+pyjwt
+python-multipart
+tzdata

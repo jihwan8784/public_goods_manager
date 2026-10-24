@@ -322,6 +322,15 @@ async def import_orgs(
     raw = await file.read(20 * 1024 * 1024 + 1)
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "파일은 20MB 이하로 올려 주세요.")
+    is_school_file = orgsync.looks_like_school_file(raw)
+    if is_school_file and kind != "school":
+        raise HTTPException(
+            422, "학교 목록 파일입니다. 기관 종류를 '학교'로 고르고 '좌표만 채우기'로 올려 주세요."
+        )
+    if kind == "school" and not coords_only:
+        has_neis = session.exec(select(Organization.id).where(Organization.source == "neis").limit(1)).first()
+        if has_neis:
+            coords_only = True  # NEIS 학교가 있으면 중복을 만들지 않고 좌표만 채운다
     try:
         if coords_only:
             res = orgsync.fill_coordinates(session, kind, orgsync.parse_org_csv(raw))
@@ -342,6 +351,17 @@ async def import_orgs(
     session.commit()
     session.refresh(run)
     return {"run": _run_out(run)}
+
+
+@router.post("/admin/orgs/cleanup-csv")
+def cleanup_csv(
+    admin: AdminUser,
+    session: SessionDep,
+    kind: str = Query(pattern="^(school|community_center|other)$"),
+):
+    """CSV 로 잘못 가져온 기관을 정리 (쓰이지 않으면 삭제, 쓰이면 비활성)."""
+    res = orgsync.cleanup_csv_orgs(session, kind)
+    return {"deleted": res.updated, "deactivated": res.deactivated}
 
 
 @router.get("/cron/sync")

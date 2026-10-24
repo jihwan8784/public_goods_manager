@@ -337,3 +337,30 @@ def test_school_location_csv_fills_coordinates_only(db, clients):
     assert db.get(type(b), b.id).lat is None  # 서울 누리초는 그대로
     assert db.get(type(c), c.id).lat == 35.16  # 시도로 구분해 부산 누리초만
     assert db.exec(select(Organization).where(Organization.name == "없는학교")).first() is None
+
+
+def test_school_file_guard_and_cleanup(db, clients, users):
+    neis = make_org(db, "7000001", "가온고등학교", "school", None, None)
+    neis.source, neis.region, neis.geocode_status = "neis", "서울특별시", "pending"
+    db.commit()
+    content = "학교ID,학교명,시도명,소재지도로명주소,위도,경도\nB1,가온고등학교,서울특별시,서울특별시 마포구,37.55,126.92\n".encode("utf-8")
+    # 주민센터로 올리면 거절
+    r = clients["admin"].post("/admin/orgs/import", files={"file": ("s.csv", content, "text/csv")}, data={"kind": "community_center"})
+    assert r.status_code == 422 and "학교" in r.json()["detail"]
+    # 학교로 올리면 체크하지 않아도 좌표만 채움 (중복 생성 없음)
+    r = clients["admin"].post("/admin/orgs/import", files={"file": ("s.csv", content, "text/csv")}, data={"kind": "school"})
+    assert r.status_code == 200 and r.json()["run"]["kind"] == "csv-coords:school"
+    assert len(db.exec(select(Organization)).all()) == 1
+    db.expire_all()
+    assert db.get(Organization, neis.id).lat == 37.55
+
+    # 정리: CSV 로 만든 기관 중 안 쓰는 것은 삭제, 쓰는 것은 비활성
+    used = make_org(db, "h1", "잘못 들어간 센터", "community_center")
+    used.source = "csv"
+    unused = make_org(db, "h2", "안 쓰는 센터", "community_center")
+    unused.source = "csv"
+    db.commit()
+    make_item(db, "X-1", org=used)
+    r = clients["admin"].post("/admin/orgs/cleanup-csv", params={"kind": "community_center"})
+    assert r.json() == {"deleted": 1, "deactivated": 1}
+    assert clients["alice"].post("/admin/orgs/cleanup-csv", params={"kind": "school"}).status_code == 403

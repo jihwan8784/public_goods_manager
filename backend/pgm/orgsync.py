@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from . import config
@@ -214,7 +215,8 @@ def fill_coordinates(session: Session, kind: str, values: list[dict]) -> SyncRes
     이름이 같고, 시도(주소 첫 단어)가 같으면 같은 기관으로 본다. 직접 지정한 좌표는 건드리지 않는다.
     """
     res = SyncResult()
-    orgs = session.exec(select(Organization).where(Organization.kind == kind)).all()
+    # CSV 로 만든 기관이 아니라 NEIS·직접 등록 기관에만 채운다
+    orgs = session.exec(select(Organization).where(Organization.kind == kind, Organization.source != "csv")).all()
     by_name: dict[str, list[Organization]] = {}
     for o in orgs:
         by_name.setdefault(_norm(o.name), []).append(o)
@@ -224,8 +226,16 @@ def fill_coordinates(session: Session, kind: str, values: list[dict]) -> SyncRes
             continue
         cands = by_name.get(_norm(v["name"]), [])
         if len(cands) > 1:
+            # 같은 이름이 여러 곳이면 시도 → 시군구(주소 두 번째 단어) 순서로 좁힌다
             region = (v.get("region") or v.get("address", "").split(" ")[0])[:2]
-            cands = [o for o in cands if (o.region or o.address)[:2] == region] if region else []
+            by_region = [o for o in cands if (o.region or o.address)[:2] == region] if region else []
+            parts = v.get("address", "").split()
+            district = parts[1] if len(parts) > 1 else ""
+            if len(by_region) == 1:
+                cands = by_region
+            else:
+                pool = by_region or cands
+                cands = [o for o in pool if district and district in o.address.split()[:3]]
         if len(cands) != 1:
             unmatched += 1
             continue
@@ -237,6 +247,31 @@ def fill_coordinates(session: Session, kind: str, values: list[dict]) -> SyncRes
             res.updated += 1
     session.commit()
     res.messages.append(f"이름으로 찾지 못한 행 {unmatched}개")
+    return res
+
+
+def looks_like_school_file(raw: bytes) -> bool:
+    head = _decode(raw[:4096] if len(raw) > 4096 else raw).splitlines()[0] if raw else ""
+    return "학교명" in head
+
+
+def cleanup_csv_orgs(session: Session, kind: str) -> SyncResult:
+    """CSV 가져오기로 만든 기관 정리: 쓰이지 않으면 삭제, 물품·회원·관리자가 연결돼 있으면 비활성."""
+    res = SyncResult()
+    used = text(
+        "EXISTS (SELECT 1 FROM pgm_item i WHERE i.org_id = o.id) "
+        "OR EXISTS (SELECT 1 FROM pgm_user u WHERE u.school_id = o.id) "
+        "OR EXISTS (SELECT 1 FROM pgm_org_admin a WHERE a.org_id = o.id)"
+    )
+    res.deactivated = session.exec(
+        text(f"UPDATE pgm_org o SET active = FALSE WHERE o.source = 'csv' AND o.kind = :k AND o.active AND ({used.text})"),
+        params={"k": kind},
+    ).rowcount
+    res.updated = session.exec(
+        text(f"DELETE FROM pgm_org o WHERE o.source = 'csv' AND o.kind = :k AND NOT ({used.text})"),
+        params={"k": kind},
+    ).rowcount
+    session.commit()
     return res
 
 

@@ -219,8 +219,21 @@ export default function OrgMap() {
           ) : error ? (
             <ErrorState message={error} onRetry={reload} />
           ) : orgs.length === 0 ? (
-            <Empty title={"이 지도 범위에 표시할 기관이 없습니다."}>
-              지도를 축소하거나 다른 지역으로 이동해 보세요.
+            <Empty title="이 지도 범위에 표시할 기관이 없습니다.">
+              {withItems ? (
+                <>
+                  지금은 물품이 등록된 기관만 보여 주고 있어요.{" "}
+                  <button
+                    type="button"
+                    className="font-semibold text-teal-800 underline"
+                    onClick={() => setWithItems(false)}
+                  >
+                    모든 기관 보기
+                  </button>
+                </>
+              ) : (
+                "지도를 축소하거나 다른 지역으로 이동해 보세요."
+              )}
             </Empty>
           ) : (
             <section className="rounded-xl border border-navy-100 bg-white shadow-sm">

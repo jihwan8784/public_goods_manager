@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
+import Logo from "./Logo";
 import { btn, ErrorState, Forbidden, Loading } from "./ui";
 
 const USER_NAV = [
@@ -80,9 +81,7 @@ function Shell({ children }: { children: ReactNode }) {
       <header className="no-print border-b border-navy-800 bg-navy-900 text-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <Link href="/" className="flex items-center gap-2 font-bold tracking-tight">
-            <span className="grid size-8 place-items-center rounded-lg bg-teal-500 text-navy-900" aria-hidden>
-              ⇄
-            </span>
+            <Logo size={32} className="rounded-lg ring-1 ring-white/25" />
             public goods manage
           </Link>
           <div className="flex items-center gap-3 text-sm">

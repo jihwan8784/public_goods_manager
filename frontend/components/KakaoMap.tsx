@@ -71,7 +71,7 @@ export default function KakaoMap({
     loadKakao()
       .then((kakao) => {
         if (!alive || !box.current) return;
-        const m = new kakao.maps.Map(box.current, { center: new kakao.maps.LatLng(37.5665, 126.978), level: 6 });
+        const m = new kakao.maps.Map(box.current, { center: new kakao.maps.LatLng(37.5665, 126.978), level: 7 });
         m.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
         const emit = () => {
           const b = m.getBounds();

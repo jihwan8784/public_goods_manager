@@ -70,7 +70,7 @@ export default function AdminOrgs() {
             <div className="mt-3 grid gap-3 text-sm">
               <ul className="grid gap-1">
                 <KeyRow ok={s.neis_key} label="교육청 NEIS 학교정보 키 (NEIS_API_KEY)" />
-                <KeyRow ok={s.kakao_key} label="카카오 주소→좌표 키 (KAKAO_REST_API_KEY)" />
+                <KeyRow ok={s.kakao_key} label="카카오 주소→좌표 키 (KAKAO_REST_API_KEY, 선택 — 없으면 위치 CSV 로 좌표 채우기)" />
                 <KeyRow ok={s.cron_secret} label="매일 자동 실행 (CRON_SECRET)" />
               </ul>
               <p>
@@ -132,6 +132,7 @@ function CsvImport({ onDone }: { onDone: (text: string, ok: boolean) => void }) 
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<OrgKind>("community_center");
   const [replace, setReplace] = useState(false);
+  const [coordsOnly, setCoordsOnly] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -143,8 +144,14 @@ function CsvImport({ onDone }: { onDone: (text: string, ok: boolean) => void }) 
       form.append("file", file);
       form.append("kind", kind);
       form.append("replace", String(replace));
+      form.append("coords_only", String(coordsOnly));
       const res = await api<{ run: Run }>("/admin/orgs/import", { form, method: "POST" });
-      onDone(`가져오기 완료: 추가 ${res.run.created} · 변경 ${res.run.updated} · 비활성 ${res.run.deactivated}`, true);
+      onDone(
+        coordsOnly
+          ? res.run.message
+          : `가져오기 완료: 추가 ${res.run.created} · 변경 ${res.run.updated} · 비활성 ${res.run.deactivated}`,
+        true,
+      );
     } catch (err) {
       onDone(errorMessage(err), false);
     } finally {
@@ -154,7 +161,7 @@ function CsvImport({ onDone }: { onDone: (text: string, ok: boolean) => void }) 
 
   return (
     <Card>
-      <h2 className="font-bold">CSV 로 기관 가져오기 (주민센터 등)</h2>
+      <h2 className="font-bold">CSV 로 기관·좌표 가져오기</h2>
       <p className="mt-1 text-xs text-navy-600">
         공공데이터포털(data.go.kr)에서 받은 행정복지센터 목록 CSV 를 올리세요. &lsquo;기관명/행정복지센터명&rsquo;, &lsquo;도로명주소&rsquo; 열이 필요하고
         &lsquo;위도/경도&rsquo; 열이 있으면 그대로 씁니다. 같은 파일을 다시 올리면 중복 없이 갱신됩니다.
@@ -172,8 +179,17 @@ function CsvImport({ onDone }: { onDone: (text: string, ok: boolean) => void }) 
             <option value="other">기타 기관</option>
           </select>
         </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={coordsOnly} onChange={(e) => setCoordsOnly(e.target.checked)} className="mt-0.5 size-4 accent-teal-700" />
+          <span>
+            이미 있는 기관에 <strong>좌표만 채우기</strong> (새 기관은 만들지 않음)
+            <span className="block text-xs text-navy-600">
+              학교: 공공데이터포털 &lsquo;전국초중등학교위치표준데이터&rsquo; CSV 를 기관 종류 &lsquo;학교&rsquo;로 올리면 NEIS 로 가져온 학교에 위도·경도가 들어갑니다. 카카오 키가 없어도 지도에 표시됩니다.
+            </span>
+          </span>
+        </label>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="size-4 accent-teal-700" />
+          <input type="checkbox" checked={replace} disabled={coordsOnly} onChange={(e) => setReplace(e.target.checked)} className="size-4 accent-teal-700" />
           파일에 없는 기존 CSV 기관은 비활성 처리 (전체 목록 파일일 때만)
         </label>
         <button type="submit" disabled={busy} className={`${btn.secondary} justify-self-start`}>

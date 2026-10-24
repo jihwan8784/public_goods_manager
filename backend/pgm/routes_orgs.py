@@ -315,6 +315,7 @@ async def import_orgs(
     file: UploadFile = File(...),
     kind: str = Form(default="community_center"),
     replace: bool = Form(default=False),
+    coords_only: bool = Form(default=False),
 ):
     if kind not in ORG_KINDS:
         raise HTTPException(422, "기관 종류가 올바르지 않습니다.")
@@ -322,16 +323,19 @@ async def import_orgs(
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "파일은 20MB 이하로 올려 주세요.")
     try:
-        res = orgsync.import_csv(session, raw, kind=kind, replace=replace)
+        if coords_only:
+            res = orgsync.fill_coordinates(session, kind, orgsync.parse_org_csv(raw))
+        else:
+            res = orgsync.import_csv(session, raw, kind=kind, replace=replace)
     except orgsync.SyncError as e:
         raise HTTPException(422, str(e))
     run = SyncRun(
-        kind=f"csv:{kind}",
+        kind=f"csv-coords:{kind}" if coords_only else f"csv:{kind}",
         status="ok",
         created=res.created,
         updated=res.updated,
         deactivated=res.deactivated,
-        message=f"파일 {file.filename} 가져오기",
+        message=f"파일 {file.filename} " + ("좌표 채우기 · 좌표 갱신 " + str(res.updated) + "곳 · " + " ".join(res.messages) if coords_only else "가져오기"),
         finished_at=now_utc(),
     )
     session.add(run)

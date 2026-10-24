@@ -47,12 +47,12 @@ cd backend && .venv/bin/python -m pytest -q
 - `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` — 최초 관리자 (관리자가 없을 때 한 번만 생성)
 - `ALLOWED_ORIGINS` (기존 값)
 - `NEIS_API_KEY` — 전국 학교 목록 (https://open.neis.go.kr 무료 인증키)
-- `KAKAO_REST_API_KEY` — 주소 → 좌표 (https://developers.kakao.com 앱의 REST API 키)
+- `KAKAO_REST_API_KEY` — (선택) 주소 → 좌표. 없으면 '기관' 메뉴에서 위치 CSV 로 좌표를 채웁니다
 - `CRON_SECRET` — 매일 자동 동기화용 임의 문자열 (Vercel Cron 이 사용)
 
 **웹 프로젝트 (donga-shop-web)**
 - `NEXT_PUBLIC_API_URL` 또는 `API_URL` — API 주소 (기존 값 그대로 사용 가능)
 - `NEXT_PUBLIC_SITE_URL` — QR 에 넣을 주소 (선택)
-- `NEXT_PUBLIC_KAKAO_MAP_KEY` — 카카오 앱의 JavaScript 키 (카카오 콘솔 → 플랫폼 → Web 에 사이트 도메인 등록)
+- `NEXT_PUBLIC_KAKAO_MAP_KEY` — (선택) 카카오맵 JavaScript 키. 없으면 OpenStreetMap 지도를 씁니다
 
 자세한 규칙과 구조는 `CLAUDE.md` 참고.

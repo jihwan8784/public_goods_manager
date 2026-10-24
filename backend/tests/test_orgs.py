@@ -307,3 +307,33 @@ def test_manual_coordinates_survive_sync(db, monkeypatch, clients):
     db.expire_all()
     o = db.get(Organization, org.id)
     assert (o.lat, o.lng, o.geocode_status, o.address) == (37.6, 127.0, "manual", "서울특별시 바뀐로 9")
+
+
+def test_school_location_csv_fills_coordinates_only(db, clients):
+    a = make_org(db, "7000001", "가온고등학교", "school", None, None)
+    a.region, a.geocode_status = "서울특별시", "pending"
+    b = make_org(db, "7000002", "누리초등학교", "school", None, None)
+    b.region = "서울특별시"
+    c = make_org(db, "7000003", "누리초등학교", "school", None, None)
+    c.region = "부산광역시"
+    for o in (a, b, c):
+        o.geocode_status = "pending"
+    db.commit()
+    content = (
+        "학교ID,학교명,시도명,소재지도로명주소,위도,경도\n"
+        "B1,가온 고등학교,서울특별시,서울특별시 마포구,37.55,126.92\n"
+        "B2,누리초등학교,부산광역시,부산광역시 해운대구,35.16,129.16\n"
+        "B3,없는학교,서울특별시,서울특별시 어딘가,37.5,127.0\n"
+    )
+    r = clients["admin"].post(
+        "/admin/orgs/import",
+        files={"file": ("schools.csv", content.encode("cp949"), "text/csv")},
+        data={"kind": "school", "coords_only": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["run"]["created"] == 0 and "갱신 2곳" in r.json()["run"]["message"]
+    db.expire_all()
+    assert (db.get(type(a), a.id).lat, db.get(type(a), a.id).geocode_status) == (37.55, "ok")
+    assert db.get(type(b), b.id).lat is None  # 서울 누리초는 그대로
+    assert db.get(type(c), c.id).lat == 35.16  # 시도로 구분해 부산 누리초만
+    assert db.exec(select(Organization).where(Organization.name == "없는학교")).first() is None

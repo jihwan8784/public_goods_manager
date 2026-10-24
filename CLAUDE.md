@@ -52,7 +52,8 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 관리번호는 기관별 고유 (`uq_pgm_item_org_code`).
 - 기관 목록: 학교는 NEIS(`NEIS_API_KEY`) 매일 동기화, 목록에서 빠진 학교는 비활성(삭제 안 함). 주민센터는 CSV 가져오기. 좌표는 카카오(`KAKAO_REST_API_KEY`), 직접 지정한 좌표(`manual`)는 동기화가 덮어쓰지 않음.
 - 실시간: 서버리스라 웹소켓 대신 화면별 15~20초 자동 갱신(`useLoad(path, { refreshMs })`, 탭 숨김 시 중지).
-- 지도: 카카오맵 JS(`NEXT_PUBLIC_KAKAO_MAP_KEY`, 카카오 개발자 콘솔에 사이트 도메인 등록 필요). 키가 없으면 목록으로 대체.
+- 지도: 기본은 키가 필요 없는 OpenStreetMap(Leaflet, `components/OsmMap.tsx`). `NEXT_PUBLIC_KAKAO_MAP_KEY` 가 있으면 카카오맵, 불러오기 실패 시 OSM 으로 대체.
+- 좌표 없이 카카오 REST 키가 없을 때: 공공데이터포털 위치 CSV 를 '좌표만 채우기'로 올려 기존 기관(이름+시도 일치)에 위도·경도 입력 (`orgsync.fill_coordinates`).
 
 ## 환경
 - 운영(Vercel, 또는 `APP_ENV=production`): `SECRET_KEY` 필수, 쿠키 Secure, 시연 데이터 생성 거부. 최초 서비스 관리자는 `BOOTSTRAP_ADMIN_EMAIL/PASSWORD` 또는 `create-admin`.

@@ -1,11 +1,17 @@
 export type Role = "user" | "admin";
 export type OrgKind = "school" | "community_center" | "other";
-export type OrgBrief = { id: number; name: string; kind: OrgKind; subtype: string; region: string };
+export type OrgBrief = {
+  id: number;
+  name: string;
+  kind: OrgKind;
+  subtype: string;
+  region: string;
+  lat?: number | null;
+  lng?: number | null;
+};
 export type OrgFull = OrgBrief & {
   address: string;
   phone: string;
-  lat: number | null;
-  lng: number | null;
   geocode_status: "pending" | "ok" | "failed" | "manual";
   source: string;
   active: boolean;

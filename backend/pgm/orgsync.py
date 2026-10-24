@@ -145,11 +145,11 @@ def sync_schools(session: Session, http_get: HttpGet = default_http_get) -> Sync
 
 # ---------------------------------------------------------------- CSV (주민센터 등)
 
-_NAME_COLS = ("기관명", "주민센터명", "행정복지센터명", "시설명", "명칭", "읍면동명", "name")
+_NAME_COLS = ("기관명", "학교명", "주민센터명", "행정복지센터명", "시설명", "명칭", "읍면동명", "name")
 _ADDR_COLS = ("도로명주소", "소재지도로명주소", "주소", "소재지지번주소", "지번주소", "address")
 _LAT_COLS = ("위도", "lat", "latitude")
 _LNG_COLS = ("경도", "lng", "lon", "longitude")
-_CODE_COLS = ("기관코드", "행정기관코드", "행정동코드", "code")
+_CODE_COLS = ("기관코드", "행정기관코드", "행정동코드", "학교ID", "code")
 _PHONE_COLS = ("전화번호", "대표전화", "phone")
 _REGION_COLS = ("시도명", "시도", "region")
 
@@ -201,6 +201,43 @@ def parse_org_csv(raw: bytes) -> list[dict]:
     if not out:
         raise SyncError("가져올 기관이 없습니다.")
     return out
+
+
+def _norm(s: str) -> str:
+    return "".join(s.split())
+
+
+def fill_coordinates(session: Session, kind: str, values: list[dict]) -> SyncResult:
+    """위치 파일(위도·경도 포함)로 이미 있는 기관의 좌표만 채운다. 새 기관은 만들지 않는다.
+
+    예: NEIS 로 가져온 학교 + 공공데이터포털 '전국초중등학교위치표준데이터' CSV.
+    이름이 같고, 시도(주소 첫 단어)가 같으면 같은 기관으로 본다. 직접 지정한 좌표는 건드리지 않는다.
+    """
+    res = SyncResult()
+    orgs = session.exec(select(Organization).where(Organization.kind == kind)).all()
+    by_name: dict[str, list[Organization]] = {}
+    for o in orgs:
+        by_name.setdefault(_norm(o.name), []).append(o)
+    unmatched = 0
+    for v in values:
+        if v.get("lat") is None:
+            continue
+        cands = by_name.get(_norm(v["name"]), [])
+        if len(cands) > 1:
+            region = (v.get("region") or v.get("address", "").split(" ")[0])[:2]
+            cands = [o for o in cands if (o.region or o.address)[:2] == region] if region else []
+        if len(cands) != 1:
+            unmatched += 1
+            continue
+        org = cands[0]
+        if org.geocode_status == "manual":
+            continue
+        if (org.lat, org.lng) != (v["lat"], v["lng"]):
+            org.lat, org.lng, org.geocode_status = v["lat"], v["lng"], "ok"
+            res.updated += 1
+    session.commit()
+    res.messages.append(f"이름으로 찾지 못한 행 {unmatched}개")
+    return res
 
 
 def import_csv(session: Session, raw: bytes, kind: str = ORG_CENTER, replace: bool = False) -> SyncResult:

@@ -122,7 +122,15 @@ def user_out(u: User) -> dict:
 def org_brief(o: Organization | None) -> dict | None:
     if not o:
         return None
-    return {"id": o.id, "name": o.name, "kind": o.kind, "subtype": o.subtype, "region": o.region}
+    return {
+        "id": o.id,
+        "name": o.name,
+        "kind": o.kind,
+        "subtype": o.subtype,
+        "region": o.region,
+        "lat": o.lat,
+        "lng": o.lng,
+    }
 
 
 def org_full(o: Organization) -> dict:

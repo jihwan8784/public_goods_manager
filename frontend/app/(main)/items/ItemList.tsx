@@ -248,20 +248,24 @@ export default function ItemList() {
           <ul className="grid gap-3 md:hidden">
             {items.map((row) => (
               <li key={row.id}>
-                <Link href={`/items/${row.id}${periodQuery}`} className="flex gap-3 rounded-xl border border-navy-100 bg-white p-3 shadow-sm">
-                  <ItemThumb item={row} />
-                  <div className="grid min-w-0 gap-1">
-                    <span className="font-bold">{row.name}</span>
-                    <span className="font-mono text-xs text-navy-600">
-                      {row.asset_code} · {row.category}
-                    </span>
-                    {row.org && <span className="text-xs font-semibold text-navy-700">{row.org.name}</span>}
-                    <Eligibility row={row} />
-                    <span className="flex flex-wrap gap-1">
+                <Link
+                  href={`/items/${row.id}${periodQuery}`}
+                  className="flex gap-3 rounded-xl border border-navy-100 bg-white p-3 shadow-sm active:bg-navy-50"
+                >
+                  <ItemThumb item={row} size="sm" />
+                  <div className="grid min-w-0 flex-1 gap-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate font-bold">{row.name}</span>
+                      <span className="shrink-0 font-mono text-xs text-navy-600">{row.asset_code}</span>
+                    </div>
+                    {row.org && <span className="truncate text-xs text-navy-700">{row.org.name}</span>}
+                    <span className="flex flex-wrap items-center gap-1">
                       <ItemBadge status={row.status} />
+                      <AccessBadge access={row.access} />
                       <PeriodState row={row} />
                     </span>
-                    <RentalState row={row} />
+                    {!row.eligible && <span className="text-xs font-semibold text-rose-800">{row.eligible_reason}</span>}
+                    {row.rented && <RentalState row={row} />}
                   </div>
                 </Link>
               </li>
@@ -308,7 +312,7 @@ export default function ItemList() {
                     <td className="px-4 py-3"><RentalState row={row} /></td>
                     {start && end && <td className="px-4 py-3"><PeriodState row={row} /></td>}
                     <td className="px-4 py-3 text-right">
-                      <Link href={`/items/${row.id}${periodQuery}`} className={btn.small}>
+                      <Link href={`/items/${row.id}${periodQuery}`} className={`${btn.small} whitespace-nowrap`}>
                         상세·예약
                       </Link>
                     </td>

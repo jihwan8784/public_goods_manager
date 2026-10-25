@@ -1,8 +1,11 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** 서버가 보낸 구분 코드 (예: email_not_verified) */
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -52,13 +55,15 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   }
   if (!res.ok) {
     let message = FALLBACK[res.status] ?? `서버 오류가 발생했습니다. (${res.status})`;
+    let code: string | undefined;
     try {
       const data = await res.json();
       if (typeof data?.detail === "string") message = data.detail;
+      if (typeof data?.code === "string") code = data.code;
     } catch {
       /* JSON이 아닌 오류 응답 */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

@@ -15,6 +15,7 @@ type User = {
   student_status: string;
   school: OrgBrief | null;
   managed_orgs: OrgBrief[];
+  email_verified: boolean;
 };
 import { useLoad } from "@/lib/useLoad";
 
@@ -51,6 +52,17 @@ export default function AdminUsers() {
     try {
       await api(`/admin/users/${u.id}`, { method: "PATCH", body: { role } });
       setFlash({ kind: "ok", text: `${u.name}님의 권한을 ${role === "admin" ? "서비스 관리자" : "일반 회원"}로 바꿨습니다.` });
+      list.reload();
+    } catch (err) {
+      setFlash({ kind: "error", text: errorMessage(err) });
+    }
+  }
+
+  async function markVerified(u: User) {
+    if (!window.confirm(`${u.name}(${u.email})님의 이메일을 인증된 것으로 처리할까요? 본인 확인을 한 경우에만 사용하세요.`)) return;
+    try {
+      await api(`/admin/users/${u.id}`, { method: "PATCH", body: { verify_email: true } });
+      setFlash({ kind: "ok", text: `${u.name}님을 이메일 인증 처리했습니다. 이제 로그인할 수 있습니다.` });
       list.reload();
     } catch (err) {
       setFlash({ kind: "error", text: errorMessage(err) });
@@ -104,7 +116,10 @@ export default function AdminUsers() {
                   <span>
                     <span className="font-semibold">{u.name}</span>
                     {u.role === "admin" && <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-xs font-bold text-teal-900">서비스 관리자</span>}
-                    <span className="block text-xs text-navy-600">{u.email}</span>
+                    <span className="block text-xs text-navy-600">
+                      {u.email}
+                      {!u.email_verified && <span className="ml-1 font-semibold text-amber-800">· 이메일 미인증</span>}
+                    </span>
                     {u.school && (
                       <span className="block text-xs text-indigo-900">
                         🎓 {u.school.name} ({u.student_status === "approved" ? "승인" : u.student_status === "pending" ? "승인 대기" : "거절"})
@@ -115,6 +130,11 @@ export default function AdminUsers() {
                     )}
                   </span>
                   <span className="flex flex-wrap gap-1.5">
+                    {!u.email_verified && (
+                      <button type="button" className={btn.small} onClick={() => markVerified(u)}>
+                        이메일 인증 처리
+                      </button>
+                    )}
                     <button type="button" className={btn.small} onClick={() => resetPassword(u)}>비밀번호 변경</button>
                     {u.id !== me.id && (
                       <button type="button" className={btn.small} onClick={() => changeRole(u, u.role === "admin" ? "user" : "admin")}>

@@ -19,6 +19,9 @@ type Student = {
   school: OrgBrief | null;
   created_at: string;
   reviewed_at: string | null;
+  birth_date: string | null;
+  age: number | null;
+  email_verified: boolean;
 };
 
 const TABS = [
@@ -116,9 +119,18 @@ export default function AdminStudents() {
                   <p className="font-bold">
                     {s.name} <span className="font-normal text-navy-600">· 학번 {s.student_no}</span>
                   </p>
-                  <p className="text-sm text-navy-700">{s.school?.name}</p>
+                  <p className="text-sm text-navy-700">
+                    {s.school?.name}
+                    {s.birth_date && (
+                      <span className="text-navy-600">
+                        {" "}
+                        · {s.birth_date} (만 {s.age}세)
+                      </span>
+                    )}
+                  </p>
                   <p className="break-all text-xs text-navy-500">
                     {s.email} · {fmtDateTime(s.created_at)} 가입
+                    {!s.email_verified && <span className="ml-1 font-semibold text-amber-800">· 이메일 미인증</span>}
                   </p>
                 </div>
                 <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${TONE[s.status]}`}>{s.status_label}</span>

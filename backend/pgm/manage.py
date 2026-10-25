@@ -14,6 +14,7 @@ from . import config
 from .db import engine, init_db
 from .models import ROLE_ADMIN, User
 from .security import hash_password
+from .timeutil import now_utc
 
 
 def main(argv: list[str]) -> int:
@@ -39,7 +40,15 @@ def main(argv: list[str]) -> int:
             if s.exec(select(User).where(User.email == email)).first():
                 print("이미 존재하는 아이디입니다.")
                 return 1
-            s.add(User(email=email, name=name, password_hash=hash_password(pw), role=ROLE_ADMIN))
+            s.add(
+                User(
+                    email=email,
+                    name=name,
+                    password_hash=hash_password(pw),
+                    role=ROLE_ADMIN,
+                    email_verified_at=now_utc(),
+                )
+            )
             s.commit()
         print(f"관리자 {email} 생성 완료")
         return 0

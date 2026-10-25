@@ -34,10 +34,13 @@ def clean_db():
     with engine.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE pgm_damage_report, pgm_reservation, pgm_item, pgm_org_admin, pgm_user, "
-                "pgm_sync_run, pgm_org RESTART IDENTITY CASCADE"
+                "TRUNCATE pgm_damage_report, pgm_reservation, pgm_item, pgm_org_admin, pgm_email_token, "
+                "pgm_user, pgm_sync_run, pgm_org RESTART IDENTITY CASCADE"
             )
         )
+    from pgm import mailer
+
+    mailer.OUTBOX.clear()
     yield
 
 
@@ -47,8 +50,14 @@ def db():
         yield s
 
 
-def make_user(db, email, role="user", name=None):
-    u = User(email=email, name=name or email.split("@")[0], role=role, password_hash=hash_password(PW))
+def make_user(db, email, role="user", name=None, verified=True):
+    u = User(
+        email=email,
+        name=name or email.split("@")[0],
+        role=role,
+        password_hash=hash_password(PW),
+        email_verified_at=now_utc() if verified else None,
+    )
     db.add(u)
     db.commit()
     db.refresh(u)

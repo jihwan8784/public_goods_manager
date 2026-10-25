@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
@@ -77,11 +77,13 @@ class SignupIn(BaseModel):
     is_student: bool = False
     school_id: int | None = None
     student_no: str | None = Field(default=None, max_length=40)
+    birth_date: date | None = None
 
 
 class StudentRequestIn(BaseModel):
     school_id: int
     student_no: str = Field(min_length=1, max_length=40)
+    birth_date: date | None = None
 
 
 class OrgIn(BaseModel):
@@ -110,6 +112,19 @@ class OrgAdminIn(BaseModel):
 class UserUpdateIn(BaseModel):
     role: str | None = Field(default=None, pattern="^(user|admin)$")
     password: str | None = Field(default=None, min_length=8, max_length=72)
+    verify_email: bool | None = None
+
+
+class EmailIn(BaseModel):
+    email: str = Field(min_length=3, max_length=120)
+
+
+class TokenIn(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+
+
+class PasswordResetIn(TokenIn):
+    password: str = Field(min_length=8, max_length=72)
 
 
 # ---------------------------------------------------------------- 출력

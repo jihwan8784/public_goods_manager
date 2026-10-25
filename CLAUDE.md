@@ -55,6 +55,13 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 지도: 기본은 키가 필요 없는 OpenStreetMap(Leaflet, `components/OsmMap.tsx`). `NEXT_PUBLIC_KAKAO_MAP_KEY` 가 있으면 카카오맵, 불러오기 실패 시 OSM 으로 대체.
 - 좌표 없이 카카오 REST 키가 없을 때: 공공데이터포털 위치 CSV 를 '좌표만 채우기'로 올려 기존 기관(이름+시도 일치)에 위도·경도 입력 (`orgsync.fill_coordinates`).
 
+## 계정·이메일 인증
+- 가입 → 인증 메일(Resend, `pgm/mailer.py`) → 링크(`/verify-email?token=`) 를 열어야 로그인 가능. 인증 전 로그인은 403 `code=email_not_verified`(비밀번호가 맞을 때만).
+- 토큰은 `pgm_email_token` 에 SHA-256 해시만 저장, 1회용, 인증 24시간·비밀번호 재설정 60분, 재발송 60초 제한. 재발송·재설정 요청은 가입 여부를 드러내지 않는 같은 응답.
+- `RESEND_API_KEY` 가 없으면: 개발은 실제로 보내지 않고 `dev_link` 를 돌려줌, 운영은 `mail=failed` 로 솔직하게 알림. 보내지 않은 메일을 보냈다고 표시하지 말 것.
+- 관리자가 만든 계정·시드·최초 관리자는 인증된 상태로 생성. 서비스 관리자는 '이메일 인증 처리' 가능. `_migrate_v3` 은 기능 도입 전 계정을 인증된 것으로 처리(한 번만).
+- 학생: 생년월일 필수, 만 14세 미만 가입 불가(보호자 동의 미구현), 학교급별 나이 범위(`people.SCHOOL_AGE_RANGE`) 확인. 학교 관리자 승인 화면에 나이 표시.
+
 ## 환경
 - 운영(Vercel, 또는 `APP_ENV=production`): `SECRET_KEY` 필수, 쿠키 Secure, 시연 데이터 생성 거부. 최초 서비스 관리자는 `BOOTSTRAP_ADMIN_EMAIL/PASSWORD` 또는 `create-admin`.
 - 외부 API 는 테스트에서 `http_get` 주입으로 가짜 응답 사용 (실제 호출 없음).

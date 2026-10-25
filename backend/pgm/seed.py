@@ -3,7 +3,7 @@
 기관·사용자는 모두 가상이다. 운영 환경에서는 manage.py 가 이 함수를 호출하지 않는다.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -123,12 +123,15 @@ def seed_demo(engine, reset: bool = False) -> None:
 
         users: dict[str, User] = {}
         for email, name, role, pw, school, status, manages in USERS:
-            u = User(email=email, name=name, role=role, password_hash=hash_password(pw))
+            u = User(email=email, name=name, role=role, password_hash=hash_password(pw), email_verified_at=now_utc())
             if school:
                 u.is_student = True
                 u.school_id = orgs[school].id
                 u.student_no = f"2{len(users)}{len(users) + 3}0{len(users) + 1}"
                 u.student_status = status
+                # 고등학생 만 17세, 중학생 만 15세 정도 (실행 연도 기준)
+                years = 17 if school == "gaon" else 15
+                u.birth_date = date(now_utc().year - years, 3, 15)
             s.add(u)
             users[email] = u
         s.flush()

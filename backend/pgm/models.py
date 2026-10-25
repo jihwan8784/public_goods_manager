@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Column, DateTime, Float, Index, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Column, Date, DateTime, Float, Index, LargeBinary, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from .timeutil import now_utc
@@ -118,6 +118,28 @@ class User(SQLModel, table=True):
     student_reject_reason: str | None = Field(default=None, max_length=300)
     student_reviewed_by: int | None = Field(default=None)
     student_reviewed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    birth_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
+    # 이메일 인증을 마친 시각. 비어 있으면 로그인할 수 없다.
+    email_verified_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+
+
+TOKEN_VERIFY, TOKEN_RESET = "verify", "reset"
+
+
+class EmailToken(SQLModel, table=True):
+    """이메일 인증·비밀번호 재설정 링크. 원문은 메일에만 있고 DB 에는 해시만 저장한다."""
+
+    __tablename__ = "pgm_email_token"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="pgm_user.id", index=True)
+    purpose: str = Field(max_length=10)
+    token_hash: str = Field(sa_column=Column(String(64), unique=True, nullable=False, index=True))
+    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(
         default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
     )

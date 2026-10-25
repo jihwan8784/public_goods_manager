@@ -51,3 +51,16 @@ MAX_IMAGE_BYTES = 2 * 1024 * 1024
 NEIS_API_KEY = os.getenv("NEIS_API_KEY", "")  # 교육청 학교 목록 (open.neis.go.kr)
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")  # 주소 → 좌표 변환 (서버 전용)
 CRON_SECRET = os.getenv("CRON_SECRET", "")  # Vercel Cron 이 보내는 인증 값
+
+# 메일 (Resend)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+# 보내는 사람. Resend 에서 인증한 도메인 주소여야 다른 사람에게 보낼 수 있다.
+MAIL_FROM = os.getenv("MAIL_FROM", "public goods manage <onboarding@resend.dev>")
+# 메일 속 링크가 가리킬 사이트 주소 (웹 프로젝트 주소)
+APP_BASE_URL = (os.getenv("APP_BASE_URL") or (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "http://localhost:3000")).rstrip("/")
+VERIFY_TOKEN_HOURS = 24
+RESET_TOKEN_MINUTES = 60
+RESEND_COOLDOWN_SECONDS = 60  # 같은 사람에게 인증 메일을 다시 보내는 최소 간격
+
+# 학생 연령 확인
+MIN_SIGNUP_AGE = 14  # 개인정보보호법: 만 14세 미만은 보호자 동의가 필요해 가입을 받지 않음

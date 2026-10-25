@@ -81,9 +81,24 @@ _V2_COLUMNS = [
 ]
 
 
+def _migrate_v3(conn) -> None:
+    """이메일 인증·생년월일 추가. 기능 도입 전에 있던 계정은 인증된 것으로 본다(한 번만 실행)."""
+    has_col = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'pgm_user' AND column_name = 'email_verified_at'"
+        )
+    ).first()
+    if not has_col:
+        conn.execute(text("ALTER TABLE pgm_user ADD COLUMN email_verified_at TIMESTAMPTZ DEFAULT now()"))
+        conn.execute(text("ALTER TABLE pgm_user ALTER COLUMN email_verified_at DROP DEFAULT"))
+    conn.execute(text("ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS birth_date DATE"))
+
+
 def _migrate_v2(conn) -> None:
     for ddl in _V2_COLUMNS:
         conn.execute(text(ddl))
+    _migrate_v3(conn)
     # 관리번호: 전체 고유 → 기관별 고유
     old_unique = conn.execute(
         text(

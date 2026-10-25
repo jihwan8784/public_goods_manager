@@ -15,6 +15,7 @@ from .routes import router
 from .routes_orgs import router as orgs_router
 from .security import hash_password
 from .services import RuleError
+from .timeutil import now_utc
 
 FIELD_LABELS = {
     "email": "아이디",
@@ -52,6 +53,7 @@ def bootstrap_admin() -> None:
                 name=config.BOOTSTRAP_ADMIN_NAME,
                 password_hash=hash_password(config.BOOTSTRAP_ADMIN_PASSWORD),
                 role=ROLE_ADMIN,
+                email_verified_at=now_utc(),
             )
         )
         s.commit()

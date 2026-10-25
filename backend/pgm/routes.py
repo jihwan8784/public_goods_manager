@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
@@ -63,6 +64,12 @@ def login(body: LoginIn, response: Response, session: SessionDep):
     ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
     if not user or not ok:
         raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다.")
+    if user.email_verified_at is None:
+        # 비밀번호가 맞을 때만 알려 준다 (가입 여부 노출 방지)
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "이메일 인증을 마쳐야 로그인할 수 있습니다. 메일함을 확인해 주세요.", "code": "email_not_verified"},
+        )
     set_session_cookie(response, user)
     return {"user": me_out(session, user)}
 

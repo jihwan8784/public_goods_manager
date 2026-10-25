@@ -34,6 +34,7 @@ export type User = {
     status: StudentStatus;
     status_label: string;
     reject_reason: string | null;
+    birth_date: string | null;
   };
 };
 export type MapOrg = OrgBrief & {

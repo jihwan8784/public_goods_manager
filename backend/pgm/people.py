@@ -1,9 +1,13 @@
-"""회원가입, 내 정보, 학생 인증 승인, 회원 관리."""
+"""회원가입·이메일 인증·비밀번호 재설정, 내 정보, 학생 인증 승인, 회원 관리."""
+
+import hashlib
+import secrets
+from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from sqlmodel import Session, col, select
 
-from . import config
+from . import config, mailer
 from .access import StaffUser, can_manage, managed_org_ids
 from .models import (
     ORG_SCHOOL,
@@ -11,13 +15,27 @@ from .models import (
     STUDENT_NONE,
     STUDENT_PENDING,
     STUDENT_REJECTED,
+    TOKEN_RESET,
+    TOKEN_VERIFY,
+    EmailToken,
     Organization,
     OrgAdmin,
     User,
 )
-from .schemas import ReasonIn, SignupIn, StudentRequestIn, UserCreateIn, UserUpdateIn, org_brief, orgs_by_id
+from .schemas import (
+    EmailIn,
+    PasswordResetIn,
+    ReasonIn,
+    SignupIn,
+    StudentRequestIn,
+    TokenIn,
+    UserCreateIn,
+    UserUpdateIn,
+    org_brief,
+    orgs_by_id,
+)
 from .security import AdminUser, CurrentUser, SessionDep, create_token, hash_password
-from .timeutil import now_utc
+from .timeutil import SEOUL, now_utc
 
 router = APIRouter()
 
@@ -49,6 +67,7 @@ def me_out(session: Session, user: User) -> dict:
             "status": user.student_status,
             "status_label": STUDENT_LABEL.get(user.student_status, user.student_status),
             "reject_reason": user.student_reject_reason,
+            "birth_date": user.birth_date,
         },
     }
 
@@ -72,11 +91,99 @@ def _school_or_422(session: Session, school_id: int | None) -> Organization:
     return school
 
 
+# ================================================================ 연령 확인
+
+
+def age_on(birth: date, today: date) -> int:
+    """만 나이"""
+    return today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+
+
+# 학교급별로 다닐 수 있는 만 나이 범위 (조기 입학·유급 등을 고려해 넉넉하게)
+SCHOOL_AGE_RANGE = {"초등학교": (5, 14), "중학교": (11, 18), "고등학교": (14, 22)}
+
+
+def check_student_age(birth: date | None, school: Organization) -> None:
+    if birth is None:
+        raise HTTPException(422, "학생은 생년월일을 입력해 주세요.")
+    today = now_utc().astimezone(SEOUL).date()
+    if birth >= today:
+        raise HTTPException(422, "생년월일을 다시 확인해 주세요.")
+    age = age_on(birth, today)
+    if age > 100:
+        raise HTTPException(422, "생년월일을 다시 확인해 주세요.")
+    if age < config.MIN_SIGNUP_AGE:
+        raise HTTPException(
+            422,
+            f"만 {config.MIN_SIGNUP_AGE}세 미만은 보호자 동의가 필요해 아직 가입할 수 없습니다. 학교 선생님께 문의해 주세요.",
+        )
+    rng = SCHOOL_AGE_RANGE.get(school.subtype)
+    if rng and not (rng[0] <= age <= rng[1]):
+        raise HTTPException(422, f"만 {age}세는 {school.subtype}에 다니는 나이로 보기 어렵습니다. 학교와 생년월일을 확인해 주세요.")
+
+
+# ================================================================ 이메일 인증 / 비밀번호 재설정
+
+
+def _hash(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def issue_token(session: Session, user: User, purpose: str) -> str:
+    raw = secrets.token_urlsafe(32)
+    ttl = timedelta(hours=config.VERIFY_TOKEN_HOURS) if purpose == TOKEN_VERIFY else timedelta(minutes=config.RESET_TOKEN_MINUTES)
+    # 같은 용도의 이전 링크는 더 이상 쓸 수 없게 한다
+    for old in session.exec(
+        select(EmailToken).where(EmailToken.user_id == user.id, EmailToken.purpose == purpose, EmailToken.used_at.is_(None))
+    ).all():
+        old.used_at = now_utc()
+    session.add(EmailToken(user_id=user.id, purpose=purpose, token_hash=_hash(raw), expires_at=now_utc() + ttl))
+    session.commit()
+    return raw
+
+
+def consume_token(session: Session, raw: str, purpose: str) -> User:
+    tok = session.exec(
+        select(EmailToken).where(EmailToken.token_hash == _hash(raw), EmailToken.purpose == purpose).with_for_update()
+    ).first()
+    if not tok or tok.used_at is not None:
+        raise HTTPException(400, "이미 사용했거나 올바르지 않은 링크입니다. 메일을 다시 요청해 주세요.")
+    if tok.expires_at <= now_utc():
+        raise HTTPException(400, "링크 사용 기간이 지났습니다. 메일을 다시 요청해 주세요.")
+    tok.used_at = now_utc()
+    user = session.get(User, tok.user_id)
+    if not user:
+        raise HTTPException(400, "계정을 찾을 수 없습니다.")
+    return user
+
+
+def _send_verification(session: Session, user: User) -> dict:
+    raw = issue_token(session, user, TOKEN_VERIFY)
+    url = f"{config.APP_BASE_URL}/verify-email?token={raw}"
+    try:
+        sent = mailer.send(mailer.verification_mail(user.email, user.name, url))
+    except mailer.MailError as e:
+        return {"mail": "failed", "message": str(e)}
+    out: dict = {"mail": "sent" if sent else "not_sent_dev"}
+    if not sent:  # 개발 환경: 메일 대신 화면에서 링크를 바로 열 수 있게
+        out["dev_link"] = url
+    return out
+
+
+def _recent_token(session: Session, user: User, purpose: str) -> bool:
+    last = session.exec(
+        select(EmailToken)
+        .where(EmailToken.user_id == user.id, EmailToken.purpose == purpose)
+        .order_by(col(EmailToken.created_at).desc())
+    ).first()
+    return bool(last and last.created_at > now_utc() - timedelta(seconds=config.RESEND_COOLDOWN_SECONDS))
+
+
 # ================================================================ 회원가입 / 내 정보
 
 
 @router.post("/auth/signup", status_code=201)
-def signup(body: SignupIn, response: Response, session: SessionDep):
+def signup(body: SignupIn, session: SessionDep):
     email = body.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
         raise HTTPException(409, "이미 가입된 이메일입니다. 로그인해 주세요.")
@@ -86,15 +193,70 @@ def signup(body: SignupIn, response: Response, session: SessionDep):
         student_no = (body.student_no or "").strip()
         if not student_no:
             raise HTTPException(422, "학번(또는 학년·반·번호)을 입력해 주세요.")
+        check_student_age(body.birth_date, school)
         user.is_student = True
         user.school_id = school.id
         user.student_no = student_no
+        user.birth_date = body.birth_date
         user.student_status = STUDENT_PENDING  # 학교 관리자가 확인해야 학교 물품 이용 가능
     session.add(user)
     session.commit()
     session.refresh(user)
-    set_session_cookie(response, user)
+    # 로그인은 이메일 인증 후에만 가능 (세션 쿠키를 주지 않는다)
+    return {"email": user.email, **_send_verification(session, user)}
+
+
+@router.post("/auth/verify-email")
+def verify_email(body: TokenIn, response: Response, session: SessionDep):
+    user = consume_token(session, body.token, TOKEN_VERIFY)
+    if user.email_verified_at is None:
+        user.email_verified_at = now_utc()
+    session.commit()
+    session.refresh(user)
+    set_session_cookie(response, user)  # 인증 링크를 누르면 바로 로그인
     return {"user": me_out(session, user)}
+
+
+@router.post("/auth/resend-verification")
+def resend_verification(body: EmailIn, session: SessionDep):
+    """가입 여부를 알려 주지 않도록 항상 같은 응답을 준다."""
+    user = session.exec(select(User).where(User.email == body.email.strip().lower())).first()
+    generic = {"message": "가입된 미인증 계정이면 인증 메일을 보냈습니다. 메일함(스팸함 포함)을 확인해 주세요."}
+    if not user or user.email_verified_at is not None:
+        return generic
+    if _recent_token(session, user, TOKEN_VERIFY):
+        raise HTTPException(429, f"잠시 후 다시 시도해 주세요. ({config.RESEND_COOLDOWN_SECONDS}초에 한 번 보낼 수 있습니다)")
+    result = _send_verification(session, user)
+    if result["mail"] == "failed":
+        raise HTTPException(503, result["message"])
+    return {**generic, **({"dev_link": result["dev_link"]} if "dev_link" in result else {})}
+
+
+@router.post("/auth/password-reset/request")
+def password_reset_request(body: EmailIn, session: SessionDep):
+    user = session.exec(select(User).where(User.email == body.email.strip().lower())).first()
+    generic = {"message": "가입된 이메일이면 비밀번호 재설정 메일을 보냈습니다. 메일함(스팸함 포함)을 확인해 주세요."}
+    if not user:
+        return generic
+    if _recent_token(session, user, TOKEN_RESET):
+        raise HTTPException(429, f"잠시 후 다시 시도해 주세요. ({config.RESEND_COOLDOWN_SECONDS}초에 한 번 보낼 수 있습니다)")
+    raw = issue_token(session, user, TOKEN_RESET)
+    url = f"{config.APP_BASE_URL}/reset-password?token={raw}"
+    try:
+        sent = mailer.send(mailer.reset_mail(user.email, user.name, url))
+    except mailer.MailError as e:
+        raise HTTPException(503, str(e))
+    return {**generic, **({} if sent else {"dev_link": url})}
+
+
+@router.post("/auth/password-reset/confirm")
+def password_reset_confirm(body: PasswordResetIn, session: SessionDep):
+    user = consume_token(session, body.token, TOKEN_RESET)
+    user.password_hash = hash_password(body.password)
+    if user.email_verified_at is None:
+        user.email_verified_at = now_utc()  # 메일 링크를 연 것 자체가 주소 소유 확인
+    session.commit()
+    return {"message": "비밀번호를 바꿨습니다. 새 비밀번호로 로그인해 주세요."}
 
 
 @router.get("/auth/me")
@@ -106,6 +268,9 @@ def me(user: CurrentUser, session: SessionDep):
 def request_student(body: StudentRequestIn, user: CurrentUser, session: SessionDep):
     """학생 인증 신청 (처음 신청, 거절 후 재신청, 전학 등 학교 변경). 다시 승인 대기 상태가 된다."""
     school = _school_or_422(session, body.school_id)
+    birth = body.birth_date or user.birth_date
+    check_student_age(birth, school)
+    user.birth_date = birth
     user.is_student = True
     user.school_id = school.id
     user.student_no = body.student_no.strip()
@@ -143,6 +308,9 @@ def _student_row(u: User, school: Organization | None) -> dict:
         "status_label": STUDENT_LABEL.get(u.student_status, u.student_status),
         "reject_reason": u.student_reject_reason,
         "school": org_brief(school),
+        "birth_date": u.birth_date,
+        "age": age_on(u.birth_date, now_utc().astimezone(SEOUL).date()) if u.birth_date else None,
+        "email_verified": u.email_verified_at is not None,
         "created_at": u.created_at,
         "reviewed_at": u.student_reviewed_at,
     }
@@ -206,6 +374,7 @@ def me_out_light(u: User) -> dict:
         "is_student": u.is_student,
         "student_status": u.student_status,
         "school_id": u.school_id,
+        "email_verified": u.email_verified_at is not None,
     }
 
 
@@ -235,7 +404,13 @@ def admin_create_user(body: UserCreateIn, admin: AdminUser, session: SessionDep)
     email = body.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
         raise HTTPException(409, "이미 등록된 아이디(이메일)입니다.")
-    u = User(email=email, name=body.name.strip(), password_hash=hash_password(body.password), role=body.role)
+    u = User(
+        email=email,
+        name=body.name.strip(),
+        password_hash=hash_password(body.password),
+        role=body.role,
+        email_verified_at=now_utc(),  # 관리자가 직접 만든 계정은 인증된 것으로 본다
+    )
     session.add(u)
     session.commit()
     session.refresh(u)
@@ -253,6 +428,8 @@ def admin_update_user(user_id: int, body: UserUpdateIn, admin: AdminUser, sessio
         u.role = body.role
     if body.password:
         u.password_hash = hash_password(body.password)
+    if body.verify_email and u.email_verified_at is None:
+        u.email_verified_at = now_utc()
     session.commit()
     session.refresh(u)
     return {"user": me_out_light(u)}

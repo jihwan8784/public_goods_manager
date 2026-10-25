@@ -1,6 +1,7 @@
 """회원가입·학생 인증, 기관별 권한, 지도, 공공데이터 동기화 테스트."""
 
 import urllib.parse
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +18,28 @@ def anon():
     return TestClient(create_app(run_startup=False))
 
 
+class _Signed:
+    """가입 → (메일 속 링크로) 이메일 인증까지 마친 결과. 성공하면 client 는 로그인 상태."""
+
+    def __init__(self, signup_res, verify_res):
+        self.status_code = signup_res.status_code
+        self._res = verify_res or signup_res
+
+    def json(self):
+        return self._res.json()
+
+
 def signup(client, email, **kw):
     body = {"email": email, "name": "새 회원", "password": "password123", **kw}
-    return client.post("/auth/signup", json=body)
+    if body.get("is_student") and "birth_date" not in body:
+        body["birth_date"] = f"{date.today().year - 17}-03-15"
+    r = client.post("/auth/signup", json=body)
+    verify = None
+    if r.status_code == 201:
+        token = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["dev_link"]).query)["token"][0]
+        verify = client.post("/auth/verify-email", json={"token": token})
+        assert verify.status_code == 200, verify.text
+    return _Signed(r, verify)
 
 
 def reserve(client, item_id, h1=1, h2=2):

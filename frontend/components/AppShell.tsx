@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import Logo from "./Logo";
 import { btn, ErrorState, Forbidden, Loading } from "./ui";
@@ -35,6 +35,14 @@ function Shell({ children }: { children: ReactNode }) {
   const { user, loading, error, refresh, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const navRef = useRef<HTMLUListElement>(null);
+
+  // 좁은 화면에서 메뉴가 가로로 넘칠 때 현재 메뉴가 보이도록 스크롤
+  useEffect(() => {
+    navRef.current
+      ?.querySelector('[aria-current="page"]')
+      ?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [pathname, user]);
 
   useEffect(() => {
     if (!loading && !user && !error) {
@@ -103,7 +111,11 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav aria-label="주요 메뉴" className="border-t border-navy-800">
-          <ul className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 text-sm">
+          {/* 오른쪽 끝을 흐리게 해서 메뉴가 더 있다는 것을 보여 줌 (넓은 화면에서는 없음) */}
+          <ul
+            ref={navRef}
+            className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 text-sm [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none] lg:[mask-image:none]"
+          >
             {nav.map((n) => {
               const active = isActive(pathname, n.href);
               return (

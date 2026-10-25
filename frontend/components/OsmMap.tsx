@@ -101,7 +101,8 @@ export default function OsmMap({
       ].join(" ");
       const icon = leaflet.divIcon({
         className: "",
-        html: `<span class="${cls}" style="transform:translate(-50%,-100%);display:inline-flex">${ICON[o.kind] ?? "🏢"} ${o.available_now}/${o.items}</span>`,
+        // 지도 배경에 묻히지 않게 조금 크게 + 아래 꼬리로 정확한 위치를 가리킴
+        html: `<span class="${cls}" style="transform:translate(-50%,calc(-100% - 7px));display:inline-flex;font-size:13px;padding:3px 10px;box-shadow:0 2px 6px rgb(13 27 51 / .35)">${ICON[o.kind] ?? "🏢"} ${o.available_now}/${o.items}</span><span style="position:absolute;left:-6px;top:-9px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid ${selected ? "#0d1b33" : available ? "#0f766e" : "#94a3b8"}"></span>`,
         iconSize: [0, 0],
       });
       const mk = leaflet

@@ -99,7 +99,11 @@ export default function AdminItems() {
                     <div className="flex flex-wrap gap-1">
                       <ItemBadge status={i.status} />
                       <AccessBadge access={i.access} />
-                      {i.rented && <span className="text-xs font-semibold text-teal-800">대여 중</span>}
+                      {i.rented && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-bold text-teal-900 ring-1 ring-inset ring-teal-300">
+                          <span aria-hidden>▶</span>대여 중
+                        </span>
+                      )}
                     </div>
                     {i.open_reports > 0 && <div className="mt-1 text-xs font-semibold text-orange-800">미처리 신고 {i.open_reports}건</div>}
                   </td>

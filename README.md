@@ -49,7 +49,7 @@ cd backend && .venv/bin/python -m pytest -q
 - `NEIS_API_KEY` — 전국 학교 목록 (https://open.neis.go.kr 무료 인증키)
 - `KAKAO_REST_API_KEY` — (선택) 주소 → 좌표. 없으면 '기관' 메뉴에서 위치 CSV 로 좌표를 채웁니다
 - `CRON_SECRET` — 매일 자동 동기화용 임의 문자열 (Vercel Cron 이 사용)
-- `RESEND_API_KEY`, `MAIL_FROM`, `APP_BASE_URL` — 이메일 인증·비밀번호 찾기 메일 (Resend, 보내는 주소는 인증한 도메인)
+- `SMTP_USER`(Gmail 주소), `SMTP_PASSWORD`(Gmail 앱 비밀번호), `APP_BASE_URL`(웹 주소) — 이메일 인증·비밀번호 찾기 메일
 
 **웹 프로젝트 (donga-shop-web)**
 - `NEXT_PUBLIC_API_URL` 또는 `API_URL` — API 주소 (기존 값 그대로 사용 가능)

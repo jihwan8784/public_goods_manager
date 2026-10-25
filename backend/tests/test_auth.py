@@ -88,12 +88,66 @@ def test_resend_is_generic_and_rate_limited(db):
 
 def test_production_without_mail_key_reports_failure(db, monkeypatch):
     monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "SMTP_USER", "")
     monkeypatch.setattr(config, "RESEND_API_KEY", "")
     r = anon().post("/auth/signup", json=BODY)
     assert r.status_code == 201
     body = r.json()
-    assert body["mail"] == "failed" and "RESEND_API_KEY" in body["message"] and "dev_link" not in body
+    assert body["mail"] == "failed" and "SMTP" in body["message"] and "dev_link" not in body
     assert mailer.OUTBOX == []
+
+
+class FakeSMTP:
+    sent: list = []
+    fail_login = False
+
+    def __init__(self, host, port, timeout=None, context=None):
+        self.host, self.port = host, port
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def login(self, user, pw):
+        import smtplib
+
+        if FakeSMTP.fail_login:
+            raise smtplib.SMTPAuthenticationError(535, b"Username and Password not accepted")
+        self.user, self.pw = user, pw
+
+    def send_message(self, msg):
+        FakeSMTP.sent.append((self.host, self.port, self.user, self.pw, msg))
+
+
+def test_gmail_smtp_sends_real_mail(db, monkeypatch):
+    import smtplib
+
+    FakeSMTP.sent, FakeSMTP.fail_login = [], False
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setattr(config, "SMTP_USER", "school.goods@gmail.com")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "abcdefghijklmnop")
+    monkeypatch.setattr(config, "MAIL_FROM", "")
+    r = anon().post("/auth/signup", json=BODY)
+    assert r.json()["mail"] == "sent" and "dev_link" not in r.json()  # 실제 발송 시 링크를 화면에 주지 않음
+    host, port, user, pw, msg = FakeSMTP.sent[0]
+    assert (host, port, user, pw) == ("smtp.gmail.com", 465, "school.goods@gmail.com", "abcdefghijklmnop")
+    assert msg["To"] == "new@t.test" and "school.goods@gmail.com" in msg["From"]
+    assert "/verify-email?token=" in msg.get_body(("plain",)).get_content()
+    assert mailer.OUTBOX == []
+
+
+def test_gmail_wrong_app_password_is_reported(db, monkeypatch):
+    import smtplib
+
+    FakeSMTP.sent, FakeSMTP.fail_login = [], True
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setattr(config, "SMTP_USER", "school.goods@gmail.com")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "wrong")
+    r = anon().post("/auth/signup", json=BODY)
+    assert r.json()["mail"] == "failed" and "앱 비밀번호" in r.json()["message"]
+    FakeSMTP.fail_login = False
 
 
 def test_password_reset(db, users):

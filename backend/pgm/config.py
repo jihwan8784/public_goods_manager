@@ -52,10 +52,15 @@ NEIS_API_KEY = os.getenv("NEIS_API_KEY", "")  # 교육청 학교 목록 (open.ne
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")  # 주소 → 좌표 변환 (서버 전용)
 CRON_SECRET = os.getenv("CRON_SECRET", "")  # Vercel Cron 이 보내는 인증 값
 
-# 메일 (Resend)
+# 메일: Gmail SMTP (기본). Gmail 주소 + 구글 계정의 '앱 비밀번호'(16자리)
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")  # 앱 비밀번호는 띄어쓰기 없이
+# 선택: SMTP 대신 Resend (내 도메인 인증 필요)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-# 보내는 사람. Resend 에서 인증한 도메인 주소여야 다른 사람에게 보낼 수 있다.
-MAIL_FROM = os.getenv("MAIL_FROM", "public goods manage <onboarding@resend.dev>")
+# 보내는 사람 표시. 비우면 "public goods manage <SMTP_USER>"
+MAIL_FROM = os.getenv("MAIL_FROM", "")
 # 메일 속 링크가 가리킬 사이트 주소 (웹 프로젝트 주소)
 APP_BASE_URL = (os.getenv("APP_BASE_URL") or (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "http://localhost:3000")).rstrip("/")
 VERIFY_TOKEN_HOURS = 24

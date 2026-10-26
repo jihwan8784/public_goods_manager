@@ -11,6 +11,13 @@ from . import config, mailer
 from .access import StaffUser, can_manage, managed_org_ids
 from .models import (
     ORG_SCHOOL,
+    R_APPROVED,
+    R_CANCELLED,
+    R_PENDING,
+    ROLE_ADMIN,
+    UNRETURNED,
+    DamageReport,
+    Reservation,
     STUDENT_APPROVED,
     STUDENT_NONE,
     STUDENT_PENDING,
@@ -375,6 +382,9 @@ def me_out_light(u: User) -> dict:
         "student_status": u.student_status,
         "school_id": u.school_id,
         "email_verified": u.email_verified_at is not None,
+        "suspended": u.suspended_at is not None,
+        "suspended_at": u.suspended_at,
+        "suspend_reason": u.suspend_reason,
     }
 
 
@@ -439,3 +449,90 @@ def admin_update_user(user_id: int, body: UserUpdateIn, admin: AdminUser, sessio
     session.refresh(u)
     return {"user": me_out_light(u)}
 
+
+
+# ================================================================ 최고 관리자: 계정 중지·삭제
+
+
+def _target_for_moderation(session: Session, admin: User, user_id: int) -> User:
+    u = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
+    if not u:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    if u.id == admin.id:
+        raise HTTPException(409, "자기 자신의 계정은 중지하거나 삭제할 수 없습니다.")
+    if u.role == ROLE_ADMIN:
+        raise HTTPException(409, "최고 관리자 계정은 중지하거나 삭제할 수 없습니다.")
+    return u
+
+
+@router.post("/admin/users/{user_id}/suspend")
+def suspend_user(user_id: int, body: ReasonIn, admin: AdminUser, session: SessionDep):
+    """이용 중지: 로그인과 모든 이용이 바로 막힌다. 예약·대여 기록은 그대로 둔다."""
+    u = _target_for_moderation(session, admin, user_id)
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(422, "중지 사유를 입력해 주세요.")
+    u.suspended_at = now_utc()
+    u.suspend_reason = reason[:300]
+    session.commit()
+    session.refresh(u)
+    return {"user": me_out_light(u)}
+
+
+@router.post("/admin/users/{user_id}/unsuspend")
+def unsuspend_user(user_id: int, admin: AdminUser, session: SessionDep):
+    u = _target_for_moderation(session, admin, user_id)
+    u.suspended_at = None
+    u.suspend_reason = None
+    session.commit()
+    session.refresh(u)
+    return {"user": me_out_light(u)}
+
+
+@router.delete("/admin/users/{user_id}")
+def delete_user(user_id: int, admin: AdminUser, session: SessionDep):
+    """계정 삭제.
+    - 빌려 간 물품이 아직 반납되지 않았으면 삭제할 수 없다.
+    - 대기·확정 예약은 취소한다.
+    - 예약·신고 기록이 없으면 완전히 지우고, 기록이 있으면 기록 보존을 위해 개인정보만 지운다(익명 처리)."""
+    u = _target_for_moderation(session, admin, user_id)
+    if session.exec(
+        select(Reservation.id).where(Reservation.user_id == u.id, col(Reservation.status).in_(UNRETURNED))
+    ).first():
+        raise HTTPException(409, "아직 반납하지 않은 물품이 있어 삭제할 수 없습니다. 반납 완료 처리 후 삭제해 주세요.")
+    now = now_utc()
+    for r in session.exec(
+        select(Reservation)
+        .where(Reservation.user_id == u.id, col(Reservation.status).in_((R_PENDING, R_APPROVED)))
+        .with_for_update()
+    ).all():
+        r.status = R_CANCELLED
+        r.cancelled_at = now
+        r.cancel_reason = "계정 삭제로 취소됨"
+        r.updated_at = now
+    for link in session.exec(select(OrgAdmin).where(OrgAdmin.user_id == u.id)).all():
+        session.delete(link)
+    for tok in session.exec(select(EmailToken).where(EmailToken.user_id == u.id)).all():
+        session.delete(tok)
+    session.flush()
+
+    has_history = session.exec(select(Reservation.id).where(Reservation.user_id == u.id)).first() or session.exec(
+        select(DamageReport.id).where(DamageReport.reporter_id == u.id)
+    ).first()
+    if has_history:
+        u.email = f"deleted-{u.id}@deleted.invalid"
+        u.name = "삭제된 회원"
+        u.password_hash = hash_password(secrets.token_urlsafe(32))  # 아무도 로그인할 수 없게
+        u.is_student = False
+        u.school_id = None
+        u.student_no = None
+        u.student_status = STUDENT_NONE
+        u.birth_date = None
+        u.suspended_at = u.suspended_at or now
+        u.suspend_reason = "삭제된 계정"
+        mode = "anonymized"
+    else:
+        session.delete(u)
+        mode = "deleted"
+    session.commit()
+    return {"ok": True, "mode": mode}

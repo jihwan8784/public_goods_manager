@@ -18,6 +18,8 @@ type User = {
   school: OrgBrief | null;
   managed_orgs: OrgBrief[];
   email_verified: boolean;
+  suspended: boolean;
+  suspend_reason: string | null;
 };
 type PickedOrg = OrgBrief & { address: string };
 
@@ -31,6 +33,51 @@ export default function AdminUsers() {
   const [saving, setSaving] = useState(false);
   const [assignFor, setAssignFor] = useState<User | null>(null);
   const [assignOrg, setAssignOrg] = useState<PickedOrg | null>(null);
+  const [moderate, setModerate] = useState<{ kind: "suspend" | "delete"; u: User } | null>(null);
+  const [reason, setReason] = useState("");
+  const [modError, setModError] = useState("");
+  const [modBusy, setModBusy] = useState(false);
+
+  async function runModeration() {
+    if (!moderate) return;
+    const { kind, u } = moderate;
+    setModError("");
+    if (kind === "suspend" && !reason.trim()) return setModError("중지 사유를 입력해 주세요.");
+    if (kind === "delete" && reason.trim() !== u.email) return setModError("확인을 위해 삭제할 계정의 이메일을 정확히 입력해 주세요.");
+    setModBusy(true);
+    try {
+      if (kind === "suspend") {
+        await api(`/admin/users/${u.id}/suspend`, { body: { reason } });
+        setFlash({ kind: "ok", text: `${u.name}님의 계정 이용을 중지했습니다. 바로 로그아웃되고 로그인할 수 없습니다.` });
+      } else {
+        const r = await api<{ mode: "deleted" | "anonymized" }>(`/admin/users/${u.id}`, { method: "DELETE" });
+        setFlash({
+          kind: "ok",
+          text:
+            r.mode === "deleted"
+              ? `${u.name}님의 계정을 삭제했습니다.`
+              : `${u.name}님의 계정을 삭제했습니다. 대여 기록 보존을 위해 기록은 '삭제된 회원'으로 남기고 개인정보는 지웠습니다.`,
+        });
+      }
+      setModerate(null);
+      list.reload();
+    } catch (err) {
+      setModError(errorMessage(err));
+    } finally {
+      setModBusy(false);
+    }
+  }
+
+  async function unsuspend(u: User) {
+    if (!window.confirm(`${u.name}님의 계정 중지를 해제할까요?`)) return;
+    try {
+      await api(`/admin/users/${u.id}/unsuspend`, { method: "POST" });
+      setFlash({ kind: "ok", text: `${u.name}님의 계정 중지를 해제했습니다.` });
+      list.reload();
+    } catch (err) {
+      setFlash({ kind: "error", text: errorMessage(err) });
+    }
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -144,6 +191,12 @@ export default function AdminUsers() {
                     {u.role !== "admin" && u.managed_orgs.length > 0 && (
                       <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-xs font-bold text-teal-900">기관 관리자</span>
                     )}
+                    {u.suspended && (
+                      <span className="ml-1.5 rounded bg-rose-600 px-1.5 py-0.5 text-xs font-bold text-white">이용 중지</span>
+                    )}
+                    {u.suspended && u.suspend_reason && (
+                      <span className="block text-xs text-rose-800">중지 사유: {u.suspend_reason}</span>
+                    )}
                     <span className="block text-xs text-navy-600">
                       {u.email}
                       {!u.email_verified && <span className="ml-1 font-semibold text-amber-800">· 이메일 미인증</span>}
@@ -190,6 +243,37 @@ export default function AdminUsers() {
                       </button>
                     )}
                     <button type="button" className={btn.small} onClick={() => resetPassword(u)}>비밀번호 변경</button>
+                    {u.role !== "admin" &&
+                      (u.suspended ? (
+                        <button type="button" className={btn.small} onClick={() => unsuspend(u)}>
+                          중지 해제
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`${btn.small} border-rose-300 text-rose-800`}
+                          onClick={() => {
+                            setReason("");
+                            setModError("");
+                            setModerate({ kind: "suspend", u });
+                          }}
+                        >
+                          계정 중지
+                        </button>
+                      ))}
+                    {u.role !== "admin" && (
+                      <button
+                        type="button"
+                        className={`${btn.small} border-rose-300 text-rose-800`}
+                        onClick={() => {
+                          setReason("");
+                          setModError("");
+                          setModerate({ kind: "delete", u });
+                        }}
+                      >
+                        계정 삭제
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -221,6 +305,53 @@ export default function AdminUsers() {
           </form>
         </Card>
       </div>
+
+      <Dialog
+        open={!!moderate}
+        title={moderate?.kind === "delete" ? "계정 삭제" : "계정 이용 중지"}
+        onClose={() => setModerate(null)}
+      >
+        {moderate && (
+          <form
+            className="grid gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              runModeration();
+            }}
+          >
+            <p className="text-sm">
+              <strong>{moderate.u.name}</strong> ({moderate.u.email})
+            </p>
+            {moderate.kind === "suspend" ? (
+              <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-950">
+                중지하면 바로 로그아웃되고 다시 로그인할 수 없습니다. 예약·대여 기록은 그대로 남고, 언제든 &lsquo;중지 해제&rsquo;할 수 있습니다.
+              </p>
+            ) : (
+              <p className="rounded-md bg-rose-50 p-3 text-sm text-rose-900">
+                되돌릴 수 없습니다. 승인 대기·확정 예약은 취소됩니다. 반납하지 않은 물품이 있으면 삭제할 수 없습니다. 대여 기록이 있는 계정은 기록 보존을 위해
+                &lsquo;삭제된 회원&rsquo;으로 남기고 이름·이메일·학생 정보만 지웁니다.
+              </p>
+            )}
+            <label className={labelCls}>
+              {moderate.kind === "suspend" ? "중지 사유 (본인이 로그인할 때 보임)" : `확인: 삭제할 계정의 이메일(${moderate.u.email})을 입력`}
+              <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} className={inputCls} aria-invalid={!!modError} />
+            </label>
+            {modError && (
+              <p role="alert" className="text-sm font-semibold text-rose-800">
+                {modError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btn.secondary} onClick={() => setModerate(null)}>
+                닫기
+              </button>
+              <button type="submit" className={btn.danger} disabled={modBusy}>
+                {moderate.kind === "suspend" ? "이용 중지" : "영구 삭제"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Dialog>
 
       <Dialog open={!!assignFor} title="기관 관리자 지정" onClose={() => setAssignFor(null)}>
         {assignFor && (

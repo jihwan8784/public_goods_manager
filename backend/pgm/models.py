@@ -124,6 +124,9 @@ class User(SQLModel, table=True):
     # 관리자 비밀 코드 연속 실패 횟수와 잠금 해제 시각
     admin_code_failures: int = Field(default=0)
     admin_code_locked_until: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    # 최고 관리자가 이용을 중지한 시각과 사유 (중지되면 로그인·이용 불가)
+    suspended_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    suspend_reason: str | None = Field(default=None, max_length=300)
     created_at: datetime = Field(
         default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
     )

@@ -197,3 +197,73 @@ def test_seed_refuses_in_production(monkeypatch):
     monkeypatch.setattr(config, "IS_PRODUCTION", True)
     with pytest.raises(RuntimeError):
         seed.seed_demo(engine)
+
+
+# ---------------------------------------------------------------- 계정 중지·삭제 (최고 관리자만)
+
+
+def test_suspend_blocks_login_and_existing_session(clients, users):
+    alice = clients["alice"]
+    assert alice.get("/auth/me").status_code == 200
+    uid = users["alice"].id
+    assert clients["admin"].post(f"/admin/users/{uid}/suspend", json={"reason": ""}).status_code == 422
+    r = clients["admin"].post(f"/admin/users/{uid}/suspend", json={"reason": "규칙 위반"})
+    assert r.status_code == 200 and r.json()["user"]["suspended"] is True
+    # 이미 로그인한 세션도 바로 막힘
+    assert alice.get("/auth/me").status_code == 401
+    r = _login("alice@t.test")[1]
+    assert r.status_code == 403 and r.json()["code"] == "account_suspended" and "규칙 위반" in r.json()["detail"]
+    # 비밀번호가 틀리면 중지 여부를 알려 주지 않음
+    assert _login("alice@t.test", password="wrong-pass")[1].status_code == 401
+    clients["admin"].post(f"/admin/users/{uid}/unsuspend")
+    assert _login("alice@t.test")[1].status_code == 200
+
+
+def test_only_super_admin_can_suspend_or_delete(clients, users, db):
+    from .conftest import make_org, make_org_admin
+
+    org = make_org(db, "o-m", "엠 기관", "other")
+    make_org_admin(db, org, users["bob"])
+    uid = users["alice"].id
+    for c in (clients["bob"], clients["alice"]):
+        assert c.post(f"/admin/users/{uid}/suspend", json={"reason": "x"}).status_code == 403
+        assert c.delete(f"/admin/users/{uid}").status_code == 403
+    # 최고 관리자 자신·다른 최고 관리자는 대상이 될 수 없음
+    assert clients["admin"].post(f"/admin/users/{users['admin'].id}/suspend", json={"reason": "x"}).status_code == 409
+    assert clients["admin"].delete(f"/admin/users/{users['admin2'].id}").status_code == 409
+
+
+def test_delete_without_history_removes_account(clients, users):
+    r = clients["admin"].delete(f"/admin/users/{users['bob'].id}")
+    assert r.status_code == 200 and r.json()["mode"] == "deleted"
+    emails = [u["email"] for u in clients["admin"].get("/admin/users").json()["users"]]
+    assert "bob@t.test" not in emails
+    assert _login("bob@t.test")[1].status_code == 401
+
+
+def test_delete_with_history_anonymizes_and_cancels(clients, users, item, db):
+    from datetime import timedelta
+
+    from pgm.models import Reservation
+    from pgm.timeutil import now_utc
+
+    rid = _reserve(clients["alice"], item.id)
+    r = clients["admin"].delete(f"/admin/users/{users['alice'].id}")
+    assert r.status_code == 200 and r.json()["mode"] == "anonymized"
+    db.expire_all()
+    res = db.get(Reservation, rid)
+    assert res.status == "cancelled" and "계정 삭제" in res.cancel_reason
+    row = next(u for u in clients["admin"].get("/admin/users").json()["users"] if u["id"] == users["alice"].id)
+    assert row["name"] == "삭제된 회원" and row["email"].endswith("@deleted.invalid")
+    assert _login("alice@t.test")[1].status_code == 401
+    # 같은 이메일로 다시 가입할 수 있음 (개인정보가 지워졌으므로)
+    assert clients["admin"].post(
+        "/admin/users", json={"email": "alice@t.test", "name": "새 앨리스", "password": "password123"}
+    ).status_code == 201
+
+    # 반납하지 않은 물품이 있으면 삭제 불가
+    db.add(Reservation(item_id=item.id, user_id=users["bob"].id, start_at=now_utc() - timedelta(hours=3),
+                       end_at=now_utc() - timedelta(hours=1), purpose="테스트", status="in_use"))
+    db.commit()
+    r = clients["admin"].delete(f"/admin/users/{users['bob'].id}")
+    assert r.status_code == 409 and "반납" in r.json()["detail"]

@@ -65,6 +65,12 @@ def login(body: LoginIn, response: Response, session: SessionDep):
     ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
     if not user or not ok:
         raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다.")
+    if user.suspended_at is not None:
+        reason = f" (사유: {user.suspend_reason})" if user.suspend_reason else ""
+        return JSONResponse(
+            status_code=403,
+            content={"detail": f"이용이 중지된 계정입니다{reason}. 관리자에게 문의해 주세요.", "code": "account_suspended"},
+        )
     if user.email_verified_at is None:
         # 비밀번호가 맞을 때만 알려 준다 (가입 여부 노출 방지)
         return JSONResponse(

@@ -52,6 +52,9 @@ def current_user(request: Request, session: SessionDep) -> User:
     user = session.get(User, user_id) if user_id else None
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "로그인이 필요합니다.")
+    if user.suspended_at is not None:
+        # 이미 로그인해 있던 사람도 다음 요청부터 바로 막힌다
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "이용이 중지된 계정입니다.")
     return user
 
 

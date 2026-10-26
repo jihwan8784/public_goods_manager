@@ -68,3 +68,4 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 운영(Vercel, 또는 `APP_ENV=production`): `SECRET_KEY` 필수, 쿠키 Secure, 시연 데이터 생성 거부. 최초 서비스 관리자는 `BOOTSTRAP_ADMIN_EMAIL/PASSWORD` 또는 `create-admin`.
 - 외부 API 는 테스트에서 `http_get` 주입으로 가짜 응답 사용 (실제 호출 없음).
 - 기존 쇼핑몰 `customer` 테이블은 건드리지 않음.
+- 계정 중지·삭제는 최고 관리자만 (/admin/users/{id}/suspend|unsuspend, DELETE /admin/users/{id}). 최고 관리자·자기 자신은 대상 불가. 중지되면 기존 세션도 즉시 401. 삭제: 미반납 대여 있으면 거부, 대기·확정 예약 취소, 기록이 있으면 익명화(기록 보존), 없으면 완전 삭제.

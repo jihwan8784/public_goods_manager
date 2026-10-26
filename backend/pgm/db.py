@@ -96,6 +96,9 @@ def _migrate_v3(conn) -> None:
     # 관리자 비밀 코드 잠금
     conn.execute(text("ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS admin_code_failures INTEGER NOT NULL DEFAULT 0"))
     conn.execute(text("ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS admin_code_locked_until TIMESTAMPTZ"))
+    # 계정 중지
+    conn.execute(text("ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ"))
+    conn.execute(text("ALTER TABLE pgm_user ADD COLUMN IF NOT EXISTS suspend_reason VARCHAR(300)"))
 
 
 def _migrate_v2(conn) -> None:

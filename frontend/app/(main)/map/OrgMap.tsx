@@ -142,7 +142,7 @@ export default function OrgMap() {
     orgs: MapOrg[];
     total: number;
     truncated: boolean;
-  }>(qs ? `/orgs/map?${qs}` : null, { refreshMs: 15000 });
+  }>(qs ? `/orgs/map?${qs}` : null, { refreshMs: 60000 }); // 지도는 기관이 많아 1분마다만 갱신
   const orgs = data?.orgs ?? [];
   const sorted = [...orgs].sort(
     (a, b) =>

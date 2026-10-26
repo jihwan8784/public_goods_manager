@@ -67,6 +67,9 @@ VERIFY_TOKEN_HOURS = 24
 RESET_TOKEN_MINUTES = 60
 RESEND_COOLDOWN_SECONDS = 60  # 같은 사람에게 인증 메일을 다시 보내는 최소 간격
 
+# 소유자 계정: 누구도 바꾸거나 중지·삭제할 수 없고, 최고 관리자 권한을 주고 빼는 일은 이 계정만 할 수 있다.
+OWNER_EMAIL = (os.getenv("OWNER_EMAIL") or "jihwan8784@kakao.com").strip().lower()
+
 # 관리자(최고·기관 관리자) 로그인 비밀 코드. 비우면 코드 확인을 하지 않는다.
 ADMIN_ACCESS_CODE = os.getenv("ADMIN_ACCESS_CODE", "").strip()
 ADMIN_CODE_MAX_FAILURES = 5  # 연속으로 틀리면

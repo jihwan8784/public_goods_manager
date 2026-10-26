@@ -1,11 +1,15 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import defer
 from sqlmodel import Session, col, select
 
 from .models import DamageReport, Item, Organization, Reservation, User
 from .services import STATUS_LABEL, is_overdue
 from .timeutil import now_utc
+
+# 목록에서는 사진 본문(bytea)을 읽지 않는다. 물품이 많을 때 가장 큰 부담
+ITEM_LIGHT = defer(Item.image_data)
 
 
 # ---------------------------------------------------------------- 입력
@@ -118,6 +122,10 @@ class UserUpdateIn(BaseModel):
     verify_email: bool | None = None
 
 
+class AdminCodeIn(BaseModel):
+    admin_code: str | None = Field(default=None, max_length=200)
+
+
 class EmailIn(BaseModel):
     email: str = Field(min_length=3, max_length=120)
 
@@ -183,7 +191,7 @@ def item_brief(i: Item, org: Organization | None = None) -> dict:
         "category": i.category,
         "location": i.location,
         "status": i.status,
-        "has_image": i.image_data is not None,
+        "has_image": i.image_type is not None,  # 사진 본문(image_data)은 읽지 않는다
         "image_version": i.image_version,
     }
 
@@ -222,7 +230,7 @@ def reservation_out(
 def reservations_out(session: Session, rows: list[Reservation]) -> list[dict]:
     item_ids = {r.item_id for r in rows}
     user_ids = {r.user_id for r in rows}
-    items = {i.id: i for i in session.exec(select(Item).where(col(Item.id).in_(item_ids))).all()} if rows else {}
+    items = {i.id: i for i in session.exec(select(Item).options(ITEM_LIGHT).where(col(Item.id).in_(item_ids))).all()} if rows else {}
     users = {u.id: u for u in session.exec(select(User).where(col(User.id).in_(user_ids))).all()} if rows else {}
     orgs = orgs_by_id(session, (i.org_id for i in items.values()))
     now = now_utc()
@@ -250,7 +258,7 @@ def report_out(rep: DamageReport, item: Item | None, reporter: User | None, org:
 def reports_out(session: Session, rows: list[DamageReport]) -> list[dict]:
     if not rows:
         return []
-    items = {i.id: i for i in session.exec(select(Item).where(col(Item.id).in_({r.item_id for r in rows}))).all()}
+    items = {i.id: i for i in session.exec(select(Item).options(ITEM_LIGHT).where(col(Item.id).in_({r.item_id for r in rows}))).all()}
     users = {
         u.id: u for u in session.exec(select(User).where(col(User.id).in_({r.reporter_id for r in rows}))).all()
     }

@@ -24,6 +24,8 @@ export type User = {
   name: string;
   /** admin = 서비스 전체 관리자 */
   role: Role;
+  /** 소유자 계정 (최고 관리자 지정·해제는 이 계정만) */
+  is_owner?: boolean;
   /** 서비스 관리자이거나 기관 관리자 */
   is_staff: boolean;
   managed_orgs: OrgBrief[];

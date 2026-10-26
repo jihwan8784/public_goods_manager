@@ -15,6 +15,7 @@ export function useLoad<T>(path: string | null, opts: Options = {}) {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const seq = useRef(0);
+  const lastJson = useRef<string>("");
 
   const load = useCallback(
     async (background: boolean) => {
@@ -27,7 +28,12 @@ export function useLoad<T>(path: string | null, opts: Options = {}) {
       try {
         const res = await api<T>(path);
         if (my !== seq.current) return; // 더 최근 요청이 있으면 무시
-        setData(res);
+        // 자동 갱신 결과가 이전과 같으면 화면을 다시 그리지 않는다 (지도·긴 목록의 버벅임 방지)
+        const json = JSON.stringify(res);
+        if (json !== lastJson.current) {
+          lastJson.current = json;
+          setData(res);
+        }
         setError(null);
         setUpdatedAt(new Date());
       } catch (e) {

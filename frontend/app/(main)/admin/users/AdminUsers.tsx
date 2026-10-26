@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useUser } from "@/components/AuthProvider";
 import Dialog from "@/components/Dialog";
 import OrgPicker from "@/components/OrgPicker";
 import { btn, Card, ErrorState, FlashMessage, inputCls, labelCls, Loading, PageHeader, type Flash } from "@/components/ui";
@@ -20,6 +21,7 @@ type User = {
   email_verified: boolean;
   suspended: boolean;
   suspend_reason: string | null;
+  is_owner: boolean;
 };
 type PickedOrg = OrgBrief & { address: string };
 
@@ -33,6 +35,29 @@ export default function AdminUsers() {
   const [saving, setSaving] = useState(false);
   const [assignFor, setAssignFor] = useState<User | null>(null);
   const [assignOrg, setAssignOrg] = useState<PickedOrg | null>(null);
+  const me = useUser();
+  const [superFor, setSuperFor] = useState<{ kind: "grant" | "revoke"; u: User } | null>(null);
+  const [code, setCode] = useState("");
+  const [superError, setSuperError] = useState("");
+
+  async function changeSuper() {
+    if (!superFor) return;
+    setSuperError("");
+    if (!code.trim()) return setSuperError("관리자 비밀 코드를 입력해 주세요.");
+    const { kind, u } = superFor;
+    try {
+      await api(`/admin/users/${u.id}/${kind === "grant" ? "grant-super" : "revoke-super"}`, { body: { admin_code: code } });
+      setFlash({
+        kind: "ok",
+        text: kind === "grant" ? `${u.name}님에게 최고 관리자 권한을 주었습니다.` : `${u.name}님의 최고 관리자 권한을 해제했습니다.`,
+      });
+      setSuperFor(null);
+      list.reload();
+    } catch (err) {
+      setSuperError(errorMessage(err));
+      setCode("");
+    }
+  }
   const [moderate, setModerate] = useState<{ kind: "suspend" | "delete"; u: User } | null>(null);
   const [reason, setReason] = useState("");
   const [modError, setModError] = useState("");
@@ -155,7 +180,7 @@ export default function AdminUsers() {
     <>
       <PageHeader
         title="회원 관리"
-        desc="관리자 권한은 기관을 정해서 줍니다. 기관 관리자는 자기 기관의 물품·예약·학생 승인만 관리합니다. 최고 관리자 권한은 화면에서 줄 수 없습니다."
+        desc="관리자 권한은 기관을 정해서 줍니다. 기관 관리자는 자기 기관의 물품·예약·학생 승인만 관리합니다. 최고 관리자 지정·해제는 관리자 비밀 코드를 입력해야 합니다."
       />
       <div className="mb-4">
         <FlashMessage flash={flash} onClose={() => setFlash(null)} />
@@ -186,7 +211,9 @@ export default function AdminUsers() {
                   <div>
                     <span className="font-semibold">{u.name}</span>
                     {u.role === "admin" && (
-                      <span className="ml-1.5 rounded bg-navy-900 px-1.5 py-0.5 text-xs font-bold text-white">최고 관리자</span>
+                      <span className="ml-1.5 rounded bg-navy-900 px-1.5 py-0.5 text-xs font-bold text-white">
+                        {u.is_owner ? "소유자 · 최고 관리자" : "최고 관리자"}
+                      </span>
                     )}
                     {u.role !== "admin" && u.managed_orgs.length > 0 && (
                       <span className="ml-1.5 rounded bg-teal-100 px-1.5 py-0.5 text-xs font-bold text-teal-900">기관 관리자</span>
@@ -242,7 +269,22 @@ export default function AdminUsers() {
                         이메일 인증 처리
                       </button>
                     )}
-                    <button type="button" className={btn.small} onClick={() => resetPassword(u)}>비밀번호 변경</button>
+                    {(!u.is_owner || u.id === me.id) && (
+                      <button type="button" className={btn.small} onClick={() => resetPassword(u)}>비밀번호 변경</button>
+                    )}
+                    {me.is_owner && u.id !== me.id && !u.suspended && (
+                      <button
+                        type="button"
+                        className={`${btn.small} border-navy-900`}
+                        onClick={() => {
+                          setCode("");
+                          setSuperError("");
+                          setSuperFor({ kind: u.role === "admin" ? "revoke" : "grant", u });
+                        }}
+                      >
+                        {u.role === "admin" ? "최고 관리자 해제" : "최고 관리자 지정"}
+                      </button>
+                    )}
                     {u.role !== "admin" &&
                       (u.suspended ? (
                         <button type="button" className={btn.small} onClick={() => unsuspend(u)}>
@@ -305,6 +347,48 @@ export default function AdminUsers() {
           </form>
         </Card>
       </div>
+
+      <Dialog
+        open={!!superFor}
+        title={superFor?.kind === "grant" ? "최고 관리자 지정" : "최고 관리자 해제"}
+        onClose={() => setSuperFor(null)}
+      >
+        {superFor && (
+          <form
+            className="grid gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              changeSuper();
+            }}
+          >
+            <p className="text-sm">
+              <strong>{superFor.u.name}</strong> ({superFor.u.email})
+            </p>
+            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-950">
+              {superFor.kind === "grant"
+                ? "최고 관리자는 모든 기관·회원을 관리하고 계정을 중지·삭제할 수 있습니다. 확인을 위해 관리자 비밀 코드를 입력해 주세요."
+                : "확인을 위해 관리자 비밀 코드를 입력해 주세요."}
+            </p>
+            <label className={labelCls}>
+              관리자 비밀 코드
+              <input type="password" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} className={inputCls} autoFocus />
+            </label>
+            {superError && (
+              <p role="alert" className="text-sm font-semibold text-rose-800">
+                {superError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btn.secondary} onClick={() => setSuperFor(null)}>
+                닫기
+              </button>
+              <button type="submit" className={btn.primary}>
+                {superFor.kind === "grant" ? "지정하기" : "해제하기"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Dialog>
 
       <Dialog
         open={!!moderate}

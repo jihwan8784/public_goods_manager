@@ -1,4 +1,3 @@
-import hmac
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
@@ -8,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from . import config, services
+from .admincode import check_admin_code as _check_admin_code
 from .access import StaffUser, can_manage, eligibility, is_staff, managed_org_ids, scope_filter
 from .people import me_out, set_session_cookie
 from .models import (
@@ -31,6 +31,7 @@ from .models import (
     User,
 )
 from .schemas import (
+    ITEM_LIGHT,
     ItemIn,
     ItemUpdateIn,
     LoginIn,
@@ -85,43 +86,6 @@ def login(body: LoginIn, response: Response, session: SessionDep):
     return {"user": me_out(session, user)}
 
 
-def _check_admin_code(session, user: User, code: str | None) -> JSONResponse | None:
-    """관리자 비밀 코드 확인. 통과하면 None, 막으면 보낼 응답."""
-    now = now_utc()
-    if user.admin_code_locked_until and user.admin_code_locked_until > now:
-        mins = max(1, int((user.admin_code_locked_until - now).total_seconds() // 60) + 1)
-        return JSONResponse(
-            status_code=429,
-            content={"detail": f"비밀 코드를 여러 번 틀려 관리자 로그인이 잠겼습니다. 약 {mins}분 후 다시 시도해 주세요.", "code": "admin_code_locked"},
-        )
-    if not code:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "관리자 계정입니다. 관리자 비밀 코드를 입력해 주세요.", "code": "admin_code_required"},
-        )
-    if hmac.compare_digest(code.strip().encode(), config.ADMIN_ACCESS_CODE.encode()):
-        if user.admin_code_failures or user.admin_code_locked_until:
-            user.admin_code_failures = 0
-            user.admin_code_locked_until = None
-            session.commit()
-        return None
-    user.admin_code_failures = (user.admin_code_failures or 0) + 1
-    left = config.ADMIN_CODE_MAX_FAILURES - user.admin_code_failures
-    if left <= 0:
-        user.admin_code_failures = 0
-        user.admin_code_locked_until = now + timedelta(minutes=config.ADMIN_CODE_LOCK_MINUTES)
-        session.commit()
-        return JSONResponse(
-            status_code=429,
-            content={"detail": f"비밀 코드를 {config.ADMIN_CODE_MAX_FAILURES}번 틀려 {config.ADMIN_CODE_LOCK_MINUTES}분 동안 관리자 로그인이 잠겼습니다.", "code": "admin_code_locked"},
-        )
-    session.commit()
-    return JSONResponse(
-        status_code=401,
-        content={"detail": f"관리자 비밀 코드가 올바르지 않습니다. ({left}번 더 틀리면 잠깁니다)", "code": "admin_code_invalid"},
-    )
-
-
 @router.post("/auth/logout")
 def logout(response: Response):
     response.delete_cookie(config.SESSION_COOKIE, path="/")
@@ -156,8 +120,11 @@ def list_items(
     available_only: bool = False,
     org: int | None = None,
     eligible_only: bool = False,
+    limit: int = Query(default=40, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
-    query = select(Item)
+    """물품 목록. 물품이 수만 개라 거르기·자르기를 모두 DB 에서 하고 한 번에 limit 개만 돌려준다."""
+    query = select(Item).options(ITEM_LIGHT)
     if org:
         query = query.where(Item.org_id == org)
     if q and q.strip():
@@ -172,8 +139,11 @@ def list_items(
     else:
         # 보관 종료 물품은 기본 목록에서 빼고, 관리자만 상태 필터로 따로 본다
         query = query.where(Item.status != ITEM_RETIRED)
-    items = list(session.exec(query.order_by(Item.name, Item.asset_code)).all())
-    ids = [i.id for i in items]
+    if eligible_only:
+        if user.is_student and user.student_status == "approved" and user.school_id:
+            query = query.where(or_(Item.access == "public", Item.org_id == user.school_id))
+        else:
+            query = query.where(Item.access == "public")
 
     period = None
     if start or end:
@@ -183,6 +153,22 @@ def list_items(
         if s >= e:
             raise HTTPException(422, "시작 시각은 종료 시각보다 빨라야 합니다.")
         period = (s, e)
+        if available_only:
+            clash = (
+                select(Reservation.id)
+                .where(
+                    Reservation.item_id == Item.id,
+                    col(Reservation.status).in_(OCCUPYING),
+                    Reservation.start_at < e,
+                    Reservation.end_at > s,
+                )
+                .exists()
+            )
+            query = query.where(Item.status == "normal", ~clash)
+
+    total = session.exec(select(func.count()).select_from(query.subquery())).one()
+    items = list(session.exec(query.order_by(Item.name, Item.org_id, Item.asset_code).offset(offset).limit(limit)).all())
+    ids = [i.id for i in items]
 
     rented: dict[int, Reservation] = {}
     busy: set[int] = set()
@@ -208,8 +194,6 @@ def list_items(
     for i in items:
         r = rented.get(i.id)
         ok, why = eligibility(user, i, orgs.get(i.org_id))
-        if eligible_only and not ok:
-            continue
         row = {
             **item_brief(i, orgs.get(i.org_id)),
             "eligible": ok,
@@ -226,10 +210,8 @@ def list_items(
                 row["period"] = {"available": False, "reason": "선택 기간에 확정된 예약 있음"}
             else:
                 row["period"] = {"available": True, "reason": None}
-            if available_only and not row["period"]["available"]:
-                continue
         out.append(row)
-    return {"items": out}
+    return {"items": out, "total": total, "offset": offset, "has_more": offset + len(out) < total}
 
 
 @router.get("/items/{item_id}")
@@ -268,6 +250,7 @@ def item_detail(item_id: int, user: CurrentUser, session: SessionDep):
             current = entry
     siblings = session.exec(
         select(Item)
+        .options(ITEM_LIGHT)
         .where(Item.name == item.name, Item.org_id == item.org_id, Item.id != item.id, Item.status != ITEM_RETIRED)
         .order_by(Item.asset_code)
     ).all()
@@ -594,12 +577,50 @@ def _require_org(session, staff: User, org_id: int) -> Organization:
 
 
 @router.get("/admin/items")
-def admin_items(staff: StaffUser, session: SessionDep, org: int | None = None):
-    ids = managed_org_ids(session, staff)
-    query = scope_filter(select(Item), Item.org_id, ids)
+def admin_items(
+    staff: StaffUser,
+    session: SessionDep,
+    org: int | None = None,
+    q: str | None = Query(default=None, max_length=80),
+    status: str | None = Query(default=None, pattern="^(normal|repair|retired)$"),
+    ids: str | None = Query(default=None, max_length=4000, description="쉼표로 구분한 물품 id (QR 인쇄용)"),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    scope = managed_org_ids(session, staff)
+    query = scope_filter(select(Item).options(ITEM_LIGHT), Item.org_id, scope)
     if org:
         query = query.where(Item.org_id == org)
-    items = list(session.exec(query.order_by(Item.category, Item.name, Item.asset_code)).all())
+    if status:
+        query = query.where(Item.status == status)
+    if ids:
+        wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:500]
+        query = query.where(col(Item.id).in_(wanted or [-1]))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        org_match = select(Organization.id).where(col(Organization.name).ilike(like))
+        query = query.where(
+            or_(
+                col(Item.name).ilike(like),
+                col(Item.asset_code).ilike(like),
+                col(Item.category).ilike(like),
+                col(Item.org_id).in_(org_match),
+            )
+        )
+    total = session.exec(select(func.count()).select_from(query.subquery())).one()
+    items = list(
+        session.exec(query.order_by(Item.org_id, Item.asset_code).offset(offset).limit(limit)).all()
+    )
+    return {**_admin_item_rows(session, items), "total": total, "offset": offset, "has_more": offset + len(items) < total}
+
+
+@router.get("/admin/items/{item_id}")
+def admin_item_one(item_id: int, staff: StaffUser, session: SessionDep):
+    item = _managed_item(session, staff, item_id)
+    return {"item": _admin_item_rows(session, [item])["items"][0]}
+
+
+def _admin_item_rows(session, items: list[Item]) -> dict:
     item_ids = [i.id for i in items] or [-1]
     counts = dict(
         session.exec(

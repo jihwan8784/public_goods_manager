@@ -13,12 +13,13 @@ type Row = ItemFull & { reservation_count: number; open_reports: number };
 export default function EditItem() {
   const { id } = useParams<{ id: string }>();
   const created = useSearchParams().get("created") === "1";
-  const list = useLoad<{ items: Row[] }>("/admin/items");
+  const list = useLoad<{ item: Row }>(/^\d+$/.test(id) ? `/admin/items/${id}` : null);
   const cats = useLoad<{ categories: string[] }>("/items/categories");
 
+  if (!/^\d+$/.test(id)) return <ErrorState message="물품을 찾을 수 없습니다." />;
   if (list.loading && !list.data) return <Loading />;
   if (list.error) return <ErrorState message={list.error} onRetry={list.reload} />;
-  const item = list.data?.items.find((i) => String(i.id) === id);
+  const item = list.data?.item;
   if (!item) return <ErrorState message="물품을 찾을 수 없습니다." />;
 
   return (

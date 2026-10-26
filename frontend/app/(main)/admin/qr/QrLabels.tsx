@@ -9,11 +9,14 @@ import type { ItemFull } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
 
 export default function QrLabels() {
-  const ids = (useSearchParams().get("ids") ?? "").split(",").filter(Boolean);
-  const { data, error, loading, reload } = useLoad<{ items: ItemFull[] }>("/admin/items");
+  const idsParam = useSearchParams().get("ids") ?? "";
+  // 선택한 물품만, 없으면 보관 종료가 아닌 물품을 앞에서부터 최대 200개
+  const { data, error, loading, reload } = useLoad<{ items: ItemFull[] }>(
+    idsParam ? `/admin/items?ids=${encodeURIComponent(idsParam)}&limit=500` : "/admin/items?limit=200",
+  );
   const [svgs, setSvgs] = useState<Record<number, string>>({});
 
-  const items = (data?.items ?? []).filter((i) => (ids.length ? ids.includes(String(i.id)) : i.status !== "retired"));
+  const items = (data?.items ?? []).filter((i) => (idsParam ? true : i.status !== "retired"));
   const key = items.map((i) => i.id).join(",");
 
   useEffect(() => {

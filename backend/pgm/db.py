@@ -31,11 +31,27 @@ ALTER TABLE pgm_reservation
 """
 
 
-def init_db(eng=None) -> None:
-    """테이블과 제약조건을 만든다. 여러 번 실행해도 안전하다."""
+# DB 구조를 바꾸면 이 숫자를 올린다. DB 에 적힌 값과 같으면 서버가 켜질 때 구조 점검을 건너뛴다.
+SCHEMA_VERSION = "5"
+
+
+def _schema_is_current(eng) -> bool:
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text("SELECT value FROM pgm_meta WHERE key = 'schema_version'")).first()
+            return bool(row) and row[0] == SCHEMA_VERSION
+    except Exception:  # 표가 아직 없으면 점검을 한다
+        return False
+
+
+def init_db(eng=None, force: bool = False) -> None:
+    """테이블과 제약조건을 만든다. 여러 번 실행해도 안전하다.
+    서버리스는 자주 새로 켜지므로, 이미 최신이면 질의 한 번으로 끝낸다."""
     from . import models  # noqa: F401  (모델 등록)
 
     eng = eng or engine
+    if not force and _schema_is_current(eng):
+        return
     with eng.begin() as conn:
         # 서버리스에서 동시에 여러 인스턴스가 떠도 한 번에 하나만 실행
         conn.execute(text("SELECT pg_advisory_xact_lock(7316001)"))
@@ -57,6 +73,22 @@ def init_db(eng=None) -> None:
                     "CHECK (start_at < end_at)"
                 )
             )
+        # 자주 쓰는 조회용 색인
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS ix_pgm_reservation_item_status ON pgm_reservation (item_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_pgm_reservation_user_status ON pgm_reservation (user_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_pgm_item_org_status ON pgm_item (org_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_pgm_org_active_kind ON pgm_org (active, kind)",
+        ):
+            conn.execute(text(ddl))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS pgm_meta (key VARCHAR(40) PRIMARY KEY, value VARCHAR(200) NOT NULL)"))
+        conn.execute(
+            text(
+                "INSERT INTO pgm_meta (key, value) VALUES ('schema_version', :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ),
+            {"v": SCHEMA_VERSION},
+        )
 
 
 def get_session() -> Iterator[Session]:

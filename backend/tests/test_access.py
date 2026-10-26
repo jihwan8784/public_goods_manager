@@ -267,3 +267,47 @@ def test_delete_with_history_anonymizes_and_cancels(clients, users, item, db):
     db.commit()
     r = clients["admin"].delete(f"/admin/users/{users['bob'].id}")
     assert r.status_code == 409 and "반납" in r.json()["detail"]
+
+
+def test_grant_and_revoke_super_needs_code(clients, users, monkeypatch):
+    from pgm import config
+
+    uid = users["alice"].id
+    monkeypatch.setattr(config, "OWNER_EMAIL", "admin@t.test")
+    # 소유자가 아닌 최고 관리자는 코드를 알아도 불가
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "Secret-2026")
+    assert clients["admin2"].post(f"/admin/users/{uid}/grant-super", json={"admin_code": "Secret-2026"}).status_code == 403
+    # 소유자 계정은 다른 관리자가 바꾸거나 해제할 수 없음
+    assert clients["admin2"].patch(f"/admin/users/{users['admin'].id}", json={"password": "newpass123"}).status_code == 403
+    assert clients["admin"].post(f"/admin/users/{users['admin'].id}/revoke-super", json={"admin_code": "Secret-2026"}).status_code == 409
+    # 코드가 설정되지 않았으면 바꿀 수 없음
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "")
+    assert clients["admin"].post(f"/admin/users/{uid}/grant-super", json={"admin_code": "x"}).status_code == 409
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "Secret-2026")
+    assert clients["admin"].post(f"/admin/users/{uid}/grant-super", json={}).status_code == 401
+    assert clients["admin"].post(f"/admin/users/{uid}/grant-super", json={"admin_code": "wrong"}).status_code == 401
+    # 최고 관리자가 아니면 코드를 알아도 불가
+    assert clients["bob"].post(f"/admin/users/{uid}/grant-super", json={"admin_code": "Secret-2026"}).status_code == 403
+    r = clients["admin"].post(f"/admin/users/{uid}/grant-super", json={"admin_code": "Secret-2026"})
+    assert r.status_code == 200 and r.json()["user"]["role"] == "admin"
+    assert clients["alice"].get("/admin/users").status_code == 200
+    # 해제도 코드 필요, 자기 자신은 해제 불가
+    assert clients["admin"].post(f"/admin/users/{users['admin'].id}/revoke-super", json={"admin_code": "Secret-2026"}).status_code == 409
+    r = clients["admin"].post(f"/admin/users/{uid}/revoke-super", json={"admin_code": "Secret-2026"})
+    assert r.status_code == 200 and r.json()["user"]["role"] == "user"
+    assert clients["alice"].get("/admin/users").status_code == 403
+
+
+def test_item_list_is_paged(clients, db):
+    from .conftest import make_item
+
+    for n in range(45):
+        make_item(db, f"P-{n:03d}", f"물품{n:03d}")
+    r = clients["alice"].get("/items").json()
+    assert len(r["items"]) == 40 and r["total"] == 45 and r["has_more"] is True
+    r2 = clients["alice"].get("/items", params={"offset": 40}).json()
+    assert len(r2["items"]) == 5 and r2["has_more"] is False
+    r3 = clients["admin"].get("/admin/items", params={"limit": 10, "q": "물품00"}).json()
+    assert r3["total"] == 10 and len(r3["items"]) == 10
+    one = clients["admin"].get(f"/admin/items/{r3['items'][0]['id']}").json()["item"]
+    assert one["id"] == r3["items"][0]["id"]

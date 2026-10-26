@@ -7,6 +7,7 @@ import { useUser } from "@/components/AuthProvider";
 import ItemThumb from "@/components/ItemThumb";
 import PeriodFields, { periodError, type Period } from "@/components/PeriodFields";
 import { AccessBadge, AvailBadge, btn, Empty, ErrorState, inputCls, ItemBadge, labelCls, LiveBadge, Loading, OverdueBadge, PageHeader } from "@/components/ui";
+import { api } from "@/lib/api";
 import { defaultSlot, fmtDateTime, toIso } from "@/lib/time";
 import type { ItemListRow, OrgFull } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
@@ -81,7 +82,24 @@ export default function ItemList() {
     qs.set("end", end);
     if (availableOnly) qs.set("available_only", "true");
   }
-  const list = useLoad<{ items: ItemListRow[] }>(`/items?${qs.toString()}`, { refreshMs: 20000 });
+  const qsKey = qs.toString();
+  const list = useLoad<{ items: ItemListRow[]; total: number; has_more: boolean }>(`/items?${qsKey}`, {
+    refreshMs: 30000,
+  });
+  // '더 보기'로 이어 붙인 물품 (조건이 바뀌면 버림)
+  const [more, setMore] = useState<{ key: string; rows: ItemListRow[]; hasMore: boolean }>({ key: "", rows: [], hasMore: false });
+  const [moreBusy, setMoreBusy] = useState(false);
+  const extra = more.key === qsKey ? more : { key: qsKey, rows: [], hasMore: list.data?.has_more ?? false };
+  async function loadMore() {
+    setMoreBusy(true);
+    try {
+      const offset = (list.data?.items.length ?? 0) + extra.rows.length;
+      const r = await api<{ items: ItemListRow[]; has_more: boolean }>(`/items?${qsKey}&offset=${offset}`);
+      setMore({ key: qsKey, rows: [...extra.rows, ...r.items], hasMore: r.has_more });
+    } finally {
+      setMoreBusy(false);
+    }
+  }
   const orgInfo = useLoad<{ org: OrgFull; members_eligible: boolean; members_reason: string | null }>(org ? `/orgs/${org}` : null);
   const cats = useLoad<{ categories: string[] }>("/items/categories");
 
@@ -111,7 +129,8 @@ export default function ItemList() {
     router.replace(`${pathname}?${next.toString()}`);
   }
 
-  const items = list.data?.items ?? [];
+  const items = [...(list.data?.items ?? []), ...extra.rows];
+  const canLoadMore = extra.rows.length ? extra.hasMore : (list.data?.has_more ?? false);
   const periodQuery = start && end ? `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}` : "";
 
   return (
@@ -242,7 +261,7 @@ export default function ItemList() {
       ) : (
         <>
           <p className="mb-3 text-sm text-navy-600" aria-live="polite">
-            {items.length}개 물품
+            전체 {(list.data?.total ?? items.length).toLocaleString("ko-KR")}개 중 {items.length.toLocaleString("ko-KR")}개 표시
           </p>
           {/* 모바일: 카드 */}
           <ul className="grid gap-3 md:hidden">
@@ -321,6 +340,13 @@ export default function ItemList() {
               </tbody>
             </table>
           </div>
+          {canLoadMore && (
+            <div className="mt-4 text-center">
+              <button type="button" className={btn.secondary} onClick={loadMore} disabled={moreBusy}>
+                {moreBusy ? "불러오는 중…" : "더 보기"}
+              </button>
+            </div>
+          )}
         </>
       )}
     </>

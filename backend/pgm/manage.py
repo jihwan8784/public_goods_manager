@@ -23,7 +23,7 @@ def main(argv: list[str]) -> int:
         return 1
     cmd = argv[0]
     if cmd == "init-db":
-        init_db()
+        init_db(force=True)
         print("데이터베이스 초기화 완료")
         return 0
     if cmd == "create-admin":

@@ -29,7 +29,9 @@ from .models import (
     OrgAdmin,
     User,
 )
+from .admincode import check_admin_code
 from .schemas import (
+    AdminCodeIn,
     EmailIn,
     PasswordResetIn,
     ReasonIn,
@@ -65,6 +67,7 @@ def me_out(session: Session, user: User) -> dict:
         "email": user.email,
         "name": user.name,
         "role": user.role,
+        "is_owner": is_owner(user),
         "is_staff": ids is None or bool(ids),
         "managed_orgs": sorted(managed, key=lambda o: o["name"]),
         "student": {
@@ -378,6 +381,7 @@ def me_out_light(u: User) -> dict:
         "email": u.email,
         "name": u.name,
         "role": u.role,
+        "is_owner": is_owner(u),
         "is_student": u.is_student,
         "student_status": u.student_status,
         "school_id": u.school_id,
@@ -441,6 +445,8 @@ def admin_update_user(user_id: int, body: UserUpdateIn, admin: AdminUser, sessio
     u = session.get(User, user_id)
     if not u:
         raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    if is_owner(u) and u.id != admin.id:
+        raise HTTPException(403, "소유자 계정은 다른 관리자가 바꿀 수 없습니다.")
     if body.password:
         u.password_hash = hash_password(body.password)
     if body.verify_email and u.email_verified_at is None:
@@ -536,3 +542,53 @@ def delete_user(user_id: int, admin: AdminUser, session: SessionDep):
         mode = "deleted"
     session.commit()
     return {"ok": True, "mode": mode}
+
+
+# ================================================================ 최고 관리자 권한 부여·해제 (보안 코드 필요)
+
+
+def is_owner(u: User | None) -> bool:
+    return bool(u) and u.role == ROLE_ADMIN and u.email.lower() == config.OWNER_EMAIL
+
+
+def _require_code(session: Session, admin: User, code: str | None) -> None:
+    if not is_owner(admin):
+        raise HTTPException(403, "최고 관리자 권한은 소유자 계정만 주거나 뺄 수 있습니다.")
+    if not config.ADMIN_ACCESS_CODE:
+        raise HTTPException(409, "관리자 비밀 코드(ADMIN_ACCESS_CODE)가 설정되지 않아 최고 관리자 권한을 바꿀 수 없습니다.")
+    blocked = check_admin_code(session, admin, code)
+    if blocked is not None:
+        import json
+
+        body = json.loads(blocked.body)
+        raise HTTPException(blocked.status_code, body["detail"])
+
+
+@router.post("/admin/users/{user_id}/grant-super")
+def grant_super(user_id: int, body: AdminCodeIn, admin: AdminUser, session: SessionDep):
+    _require_code(session, admin, body.admin_code)
+    u = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
+    if not u:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    if u.suspended_at is not None:
+        raise HTTPException(409, "이용이 중지된 계정에는 최고 관리자 권한을 줄 수 없습니다.")
+    if u.email_verified_at is None:
+        raise HTTPException(409, "이메일 인증을 마친 계정에만 최고 관리자 권한을 줄 수 있습니다.")
+    u.role = ROLE_ADMIN
+    session.commit()
+    session.refresh(u)
+    return {"user": me_out_light(u)}
+
+
+@router.post("/admin/users/{user_id}/revoke-super")
+def revoke_super(user_id: int, body: AdminCodeIn, admin: AdminUser, session: SessionDep):
+    _require_code(session, admin, body.admin_code)
+    u = session.exec(select(User).where(User.id == user_id).with_for_update()).first()
+    if not u or u.role != ROLE_ADMIN:
+        raise HTTPException(404, "최고 관리자 계정이 아닙니다.")
+    if u.id == admin.id or is_owner(u):
+        raise HTTPException(409, "소유자·자기 자신의 최고 관리자 권한은 해제할 수 없습니다.")
+    u.role = "user"
+    session.commit()
+    session.refresh(u)
+    return {"user": me_out_light(u)}

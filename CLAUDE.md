@@ -69,3 +69,5 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 외부 API 는 테스트에서 `http_get` 주입으로 가짜 응답 사용 (실제 호출 없음).
 - 기존 쇼핑몰 `customer` 테이블은 건드리지 않음.
 - 계정 중지·삭제는 최고 관리자만 (/admin/users/{id}/suspend|unsuspend, DELETE /admin/users/{id}). 최고 관리자·자기 자신은 대상 불가. 중지되면 기존 세션도 즉시 401. 삭제: 미반납 대여 있으면 거부, 대기·확정 예약 취소, 기록이 있으면 익명화(기록 보존), 없으면 완전 삭제.
+- 소유자 계정(`OWNER_EMAIL`, 기본 jihwan8784@kakao.com): 다른 관리자가 바꾸거나 중지·삭제·해제 불가. 최고 관리자 지정·해제(`grant-super`/`revoke-super`)는 소유자만 + `ADMIN_ACCESS_CODE` 입력.
+- 성능: 물품 목록(`/items`, `/admin/items`)은 DB 에서 거르고 limit/offset 으로 나눠 줌(`total`,`has_more`). 목록 조회는 `ITEM_LIGHT`(사진 bytea 제외). `useLoad` 는 결과가 같으면 다시 그리지 않음. API 는 DB 와 같은 싱가포르(`vercel.json` regions sin1). `init_db` 는 `pgm_meta.schema_version` 이 `SCHEMA_VERSION` 과 같으면 건너뜀 → 구조를 바꾸면 숫자를 올릴 것.

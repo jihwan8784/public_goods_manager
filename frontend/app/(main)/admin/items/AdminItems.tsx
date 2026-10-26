@@ -4,23 +4,39 @@ import Link from "next/link";
 import { useState } from "react";
 import ItemThumb from "@/components/ItemThumb";
 import { AccessBadge, btn, Empty, ErrorState, inputBase, inputCls, ItemBadge, Loading, PageHeader } from "@/components/ui";
+import { api } from "@/lib/api";
 import type { ItemFull, ItemStatus } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
 
 type Row = ItemFull & { reservation_count: number; rented: boolean; open_reports: number };
 
+type Page = { items: Row[]; total: number; has_more: boolean };
+
 export default function AdminItems() {
-  const { data, error, loading, reload } = useLoad<{ items: Row[] }>("/admin/items");
   const [q, setQ] = useState("");
+  const [applied, setApplied] = useState("");
   const [status, setStatus] = useState<"" | ItemStatus>("");
   const [selected, setSelected] = useState<number[]>([]);
-
-  const rows = (data?.items ?? []).filter(
-    (i) =>
-      (!status || i.status === status) &&
-      (!q.trim() ||
-        `${i.name} ${i.asset_code} ${i.category} ${i.org?.name ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())),
-  );
+  // 물품이 많을 수 있어 검색·상태 거르기는 서버에서, 50개씩 나눠 불러온다
+  const params = new URLSearchParams({ limit: "50" });
+  if (applied) params.set("q", applied);
+  if (status) params.set("status", status);
+  const key = params.toString();
+  const { data, error, loading, reload } = useLoad<Page>(`/admin/items?${key}`);
+  const [more, setMore] = useState<{ key: string; rows: Row[]; hasMore: boolean }>({ key: "", rows: [], hasMore: false });
+  const [moreBusy, setMoreBusy] = useState(false);
+  const extra = more.key === key ? more.rows : [];
+  const rows = [...(data?.items ?? []), ...extra];
+  const canLoadMore = more.key === key && extra.length ? more.hasMore : (data?.has_more ?? false);
+  async function loadMore() {
+    setMoreBusy(true);
+    try {
+      const r = await api<Page>(`/admin/items?${key}&offset=${rows.length}`);
+      setMore({ key, rows: [...extra, ...r.items], hasMore: r.has_more });
+    } finally {
+      setMoreBusy(false);
+    }
+  }
   const toggle = (id: number) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   return (
@@ -35,14 +51,22 @@ export default function AdminItems() {
               href={selected.length ? `/admin/qr?ids=${selected.join(",")}` : "/admin/qr"}
               className={btn.secondary}
             >
-              {selected.length ? `선택한 ${selected.length}개 QR 인쇄` : "전체 QR 라벨 인쇄"}
+              {selected.length ? `선택한 ${selected.length}개 QR 인쇄` : "QR 라벨 인쇄"}
             </Link>
           </>
         }
       />
-      <div className="mb-4 flex flex-wrap gap-2">
+      <form
+        role="search"
+        className="mb-4 flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setApplied(q.trim());
+        }}
+      >
         <label className="sr-only" htmlFor="item-q">물품 검색</label>
         <input id="item-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름, 관리번호, 카테고리, 기관" className={`${inputCls} max-w-xs`} />
+        <button type="submit" className={btn.secondary}>검색</button>
         <label className="sr-only" htmlFor="item-status">상태</label>
         <select id="item-status" value={status} onChange={(e) => setStatus(e.target.value as ItemStatus | "")} className={`${inputBase} w-40`}>
           <option value="">모든 상태</option>
@@ -50,17 +74,21 @@ export default function AdminItems() {
           <option value="repair">수리 중</option>
           <option value="retired">보관 종료</option>
         </select>
-      </div>
+      </form>
 
       {loading && !data ? (
         <Loading />
       ) : error ? (
         <ErrorState message={error} onRetry={reload} />
       ) : rows.length === 0 ? (
-        <Empty title={data?.items.length ? "조건에 맞는 물품이 없습니다." : "등록된 물품이 없습니다."}>
-          {!data?.items.length && <Link href="/admin/items/new" className="font-semibold text-teal-800 underline">첫 물품 등록하기</Link>}
+        <Empty title={applied || status ? "조건에 맞는 물품이 없습니다." : "등록된 물품이 없습니다."}>
+          {!applied && !status && <Link href="/admin/items/new" className="font-semibold text-teal-800 underline">첫 물품 등록하기</Link>}
         </Empty>
       ) : (
+        <>
+        <p className="mb-2 text-sm text-navy-600">
+          전체 {(data?.total ?? rows.length).toLocaleString("ko-KR")}개 중 {rows.length.toLocaleString("ko-KR")}개 표시
+        </p>
         <div className="overflow-x-auto rounded-xl border border-navy-100 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <caption className="sr-only">물품 관리 목록</caption>
@@ -116,6 +144,14 @@ export default function AdminItems() {
             </tbody>
           </table>
         </div>
+        {canLoadMore && (
+          <div className="mt-4 text-center">
+            <button type="button" className={btn.secondary} onClick={loadMore} disabled={moreBusy}>
+              {moreBusy ? "불러오는 중…" : "더 보기"}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </>
   );

@@ -384,3 +384,17 @@ def test_school_file_guard_and_cleanup(db, clients, users):
     r = clients["admin"].post("/admin/orgs/cleanup-csv", params={"kind": "community_center"})
     assert r.json() == {"deleted": 1, "deactivated": 1}
     assert clients["alice"].post("/admin/orgs/cleanup-csv", params={"kind": "school"}).status_code == 403
+
+
+def test_large_korean_csv_does_not_break_school_check(db, clients):
+    # 4096바이트 경계가 한글 글자 중간에 걸리는 큰 파일 (이전에는 500 오류)
+    rows = "".join(f"서교동행정복지센터{i},서울특별시 마포구 서교로 {i},37.55,126.92\n" for i in range(400))
+    content = ("기관명,도로명주소,위도,경도\n" + rows).encode("utf-8-sig")
+    assert len(content) > 4096
+    r = clients["admin"].post(
+        "/admin/orgs/import",
+        files={"file": ("centers.csv", content, "text/csv")},
+        data={"kind": "community_center"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["run"]["created"] == 400

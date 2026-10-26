@@ -251,8 +251,14 @@ def fill_coordinates(session: Session, kind: str, values: list[dict]) -> SyncRes
 
 
 def looks_like_school_file(raw: bytes) -> bool:
-    head = _decode(raw[:4096] if len(raw) > 4096 else raw).splitlines()[0] if raw else ""
-    return "학교명" in head
+    """첫 줄(머리글)에 '학교명' 이 있는지. 파일 전체를 해독해 글자 중간에서 잘리는 문제를 피한다."""
+    if not raw:
+        return False
+    try:
+        lines = _decode(raw).splitlines()
+    except SyncError:
+        return False  # 인코딩 오류는 실제 가져오기 단계에서 안내한다
+    return bool(lines) and "학교명" in lines[0]
 
 
 def cleanup_csv_orgs(session: Session, kind: str) -> SyncResult:

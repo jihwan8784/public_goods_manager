@@ -1,13 +1,14 @@
+import hmac
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, or_
+from sqlalchemy import Integer, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from . import config, services
-from .access import StaffUser, can_manage, eligibility, managed_org_ids, scope_filter
+from .access import StaffUser, can_manage, eligibility, is_staff, managed_org_ids, scope_filter
 from .people import me_out, set_session_cookie
 from .models import (
     ITEM_RETIRED,
@@ -70,8 +71,49 @@ def login(body: LoginIn, response: Response, session: SessionDep):
             status_code=403,
             content={"detail": "이메일 인증을 마쳐야 로그인할 수 있습니다. 메일함을 확인해 주세요.", "code": "email_not_verified"},
         )
+    if config.ADMIN_ACCESS_CODE and is_staff(session, user):
+        blocked = _check_admin_code(session, user, body.admin_code)
+        if blocked:
+            return blocked
     set_session_cookie(response, user)
     return {"user": me_out(session, user)}
+
+
+def _check_admin_code(session, user: User, code: str | None) -> JSONResponse | None:
+    """관리자 비밀 코드 확인. 통과하면 None, 막으면 보낼 응답."""
+    now = now_utc()
+    if user.admin_code_locked_until and user.admin_code_locked_until > now:
+        mins = max(1, int((user.admin_code_locked_until - now).total_seconds() // 60) + 1)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"비밀 코드를 여러 번 틀려 관리자 로그인이 잠겼습니다. 약 {mins}분 후 다시 시도해 주세요.", "code": "admin_code_locked"},
+        )
+    if not code:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "관리자 계정입니다. 관리자 비밀 코드를 입력해 주세요.", "code": "admin_code_required"},
+        )
+    if hmac.compare_digest(code.strip().encode(), config.ADMIN_ACCESS_CODE.encode()):
+        if user.admin_code_failures or user.admin_code_locked_until:
+            user.admin_code_failures = 0
+            user.admin_code_locked_until = None
+            session.commit()
+        return None
+    user.admin_code_failures = (user.admin_code_failures or 0) + 1
+    left = config.ADMIN_CODE_MAX_FAILURES - user.admin_code_failures
+    if left <= 0:
+        user.admin_code_failures = 0
+        user.admin_code_locked_until = now + timedelta(minutes=config.ADMIN_CODE_LOCK_MINUTES)
+        session.commit()
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"비밀 코드를 {config.ADMIN_CODE_MAX_FAILURES}번 틀려 {config.ADMIN_CODE_LOCK_MINUTES}분 동안 관리자 로그인이 잠겼습니다.", "code": "admin_code_locked"},
+        )
+    session.commit()
+    return JSONResponse(
+        status_code=401,
+        content={"detail": f"관리자 비밀 코드가 올바르지 않습니다. ({left}번 더 틀리면 잠깁니다)", "code": "admin_code_invalid"},
+    )
 
 
 @router.post("/auth/logout")
@@ -584,19 +626,22 @@ def admin_items(staff: StaffUser, session: SessionDep, org: int | None = None):
     }
 
 
-def _code_taken(session, org_id: int, code: str, exclude_id: int | None = None) -> bool:
-    q = select(Item).where(Item.org_id == org_id, func.upper(Item.asset_code) == code.upper())
-    if exclude_id:
-        q = q.where(Item.id != exclude_id)
-    return session.exec(q).first() is not None
+def next_asset_code(session, org_id: int) -> str:
+    """기관별 다음 관리번호 (0001, 0002, …). 기관 행을 잠가 동시에 등록해도 번호가 겹치지 않는다.
+    예전 방식 관리번호(MIC-001 등)는 건너뛰고 숫자만으로 된 번호 중 가장 큰 값 + 1."""
+    session.exec(select(Organization.id).where(Organization.id == org_id).with_for_update()).first()
+    biggest = session.exec(
+        select(func.max(func.cast(Item.asset_code, Integer))).where(
+            Item.org_id == org_id, col(Item.asset_code).regexp_match(r"^\d{1,9}$")
+        )
+    ).one()
+    return f"{(biggest or 0) + 1:04d}"
 
 
 @router.post("/admin/items", status_code=201)
 def admin_create_item(body: ItemIn, staff: StaffUser, session: SessionDep):
     org = _require_org(session, staff, body.org_id)
-    code = body.asset_code.strip().upper()
-    if _code_taken(session, org.id, code):
-        raise HTTPException(409, f"관리번호 {code}는 이 기관에서 이미 사용 중입니다.")
+    code = next_asset_code(session, org.id)
     item = Item(
         org_id=org.id,
         access=body.access,
@@ -612,7 +657,7 @@ def admin_create_item(body: ItemIn, staff: StaffUser, session: SessionDep):
         session.commit()
     except IntegrityError:
         session.rollback()
-        raise HTTPException(409, f"관리번호 {code}는 이 기관에서 이미 사용 중입니다.")
+        raise HTTPException(409, "관리번호를 정하는 중 충돌이 났습니다. 다시 시도해 주세요.")
     session.refresh(item)
     return {"item": item_full(item, org)}
 
@@ -629,9 +674,8 @@ def admin_update_item(item_id: int, body: ItemUpdateIn, staff: StaffUser, sessio
         ).first()
         if has_open:
             raise HTTPException(409, "진행 중인 예약이 있는 물품은 다른 기관으로 옮길 수 없습니다.")
-    code = body.asset_code.strip().upper()
-    if _code_taken(session, org.id, code, exclude_id=item_id):
-        raise HTTPException(409, f"관리번호 {code}는 이 기관에서 이미 사용 중입니다.")
+    # 관리번호는 직접 바꾸지 않는다. 다른 기관으로 옮기면 그 기관의 다음 번호를 새로 받는다.
+    code = item.asset_code if org.id == item.org_id else next_asset_code(session, org.id)
     status_changed = item.status != body.status
     item.org_id = org.id
     item.access = body.access
@@ -646,7 +690,7 @@ def admin_update_item(item_id: int, body: ItemUpdateIn, staff: StaffUser, sessio
         session.commit()
     except IntegrityError:
         session.rollback()
-        raise HTTPException(409, f"관리번호 {code}는 이 기관에서 이미 사용 중입니다.")
+        raise HTTPException(409, "관리번호를 정하는 중 충돌이 났습니다. 다시 시도해 주세요.")
     affected = []
     if status_changed:
         result = services.set_item_status(session, item_id, body.status)

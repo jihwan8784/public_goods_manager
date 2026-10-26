@@ -100,16 +100,92 @@ def test_item_with_history_cannot_be_deleted(clients, item):
     assert r.status_code == 409 and "보관 종료" in r.json()["detail"]
 
 
-def test_admin_cannot_demote_self(clients, users):
-    r = clients["admin"].patch(f"/admin/users/{users['admin'].id}", json={"role": "user"})
-    assert r.status_code == 409
-
-
-def test_role_change_applies_immediately(clients, users):
-    # 토큰에 역할을 담지 않으므로 관리자 해제가 즉시 반영된다
-    assert clients["admin2"].get("/admin/users").status_code == 200
+def test_super_admin_role_cannot_be_changed_from_api(clients, users, db):
+    # role 을 보내도 무시된다 (최고 관리자는 화면·API 로 만들거나 뺄 수 없음)
+    clients["admin"].patch(f"/admin/users/{users['alice'].id}", json={"role": "admin"})
+    assert clients["alice"].get("/admin/users").status_code == 403
     clients["admin"].patch(f"/admin/users/{users['admin2'].id}", json={"role": "user"})
-    assert clients["admin2"].get("/admin/users").status_code == 403
+    assert clients["admin2"].get("/admin/users").status_code == 200
+
+
+def test_org_admin_rights_apply_immediately(clients, users, db):
+    # 토큰에 권한을 담지 않으므로 기관 관리자 지정·해제가 바로 반영된다
+    from .conftest import make_org
+
+    org = make_org(db, "o-x", "엑스 기관", "other")
+    assert clients["alice"].get("/admin/reservations").status_code == 403
+    r = clients["admin"].post(f"/admin/orgs/{org.id}/admins", json={"email": users["alice"].email})
+    assert r.status_code == 201
+    assert clients["alice"].get("/admin/reservations").status_code == 200
+    clients["admin"].delete(f"/admin/orgs/{org.id}/admins/{users['alice'].id}")
+    assert clients["alice"].get("/admin/reservations").status_code == 403
+
+
+def test_create_user_as_org_admin(clients, db):
+    from .conftest import make_org
+
+    org = make_org(db, "o-y", "와이 기관", "other")
+    r = clients["admin"].post(
+        "/admin/users", json={"email": "staff@t.test", "name": "담당", "password": "password123", "org_id": org.id}
+    )
+    assert r.status_code == 201 and r.json()["user"]["role"] == "user"
+    rows = {u["email"]: u for u in clients["admin"].get("/admin/users").json()["users"]}
+    assert [o["name"] for o in rows["staff@t.test"]["managed_orgs"]] == ["와이 기관"]
+
+
+# ---------------------------------------------------------------- 관리자 비밀 코드
+
+
+def _login(email, password="password123", code=None):
+    from fastapi.testclient import TestClient
+
+    c = TestClient(create_app(run_startup=False))
+    body = {"email": email, "password": password}
+    if code is not None:
+        body["admin_code"] = code
+    return c, c.post("/auth/login", json=body)
+
+
+def test_admin_code_required_for_staff_only(users, db, monkeypatch):
+    from pgm import config
+
+    from .conftest import make_org, make_org_admin
+
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "Secret-2026")
+    org = make_org(db, "o-z", "제트 기관", "other")
+    make_org_admin(db, org, users["bob"])
+    # 일반 회원은 코드 없이 로그인
+    assert _login("alice@t.test")[1].status_code == 200
+    # 최고 관리자·기관 관리자는 코드 필요
+    for email in ("admin@t.test", "bob@t.test"):
+        c, r = _login(email)
+        assert r.status_code == 401 and r.json()["code"] == "admin_code_required"
+        assert "set-cookie" not in r.headers and c.get("/auth/me").status_code == 401
+        c, r = _login(email, code="Secret-2026")
+        assert r.status_code == 200 and c.get("/auth/me").status_code == 200
+    # 비밀번호가 틀리면 코드 여부를 알려 주지 않음
+    assert _login("admin@t.test", password="wrong-pass")[1].status_code == 401
+    assert "code" not in _login("admin@t.test", password="wrong-pass")[1].json()
+
+
+def test_admin_code_lockout(users, db, monkeypatch):
+    from pgm import config
+
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "Secret-2026")
+    for i in range(config.ADMIN_CODE_MAX_FAILURES - 1):
+        r = _login("admin@t.test", code="nope")[1]
+        assert r.status_code == 401 and r.json()["code"] == "admin_code_invalid"
+    r = _login("admin@t.test", code="nope")[1]
+    assert r.status_code == 429 and r.json()["code"] == "admin_code_locked"
+    # 잠긴 동안은 맞는 코드도 거절
+    assert _login("admin@t.test", code="Secret-2026")[1].status_code == 429
+
+
+def test_no_admin_code_configured_keeps_password_login(users, monkeypatch):
+    from pgm import config
+
+    monkeypatch.setattr(config, "ADMIN_ACCESS_CODE", "")
+    assert _login("admin@t.test")[1].status_code == 200
 
 
 def test_seed_refuses_in_production(monkeypatch):

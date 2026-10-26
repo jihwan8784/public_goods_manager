@@ -121,6 +121,9 @@ class User(SQLModel, table=True):
     birth_date: date | None = Field(default=None, sa_column=Column(Date, nullable=True))
     # 이메일 인증을 마친 시각. 비어 있으면 로그인할 수 없다.
     email_verified_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    # 관리자 비밀 코드 연속 실패 횟수와 잠금 해제 시각
+    admin_code_failures: int = Field(default=0)
+    admin_code_locked_until: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     created_at: datetime = Field(
         default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
     )

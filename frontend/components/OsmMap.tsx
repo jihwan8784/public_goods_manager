@@ -22,6 +22,59 @@ function escapeHtml(s: string) {
   );
 }
 
+type Group = {
+  lat: number;
+  lng: number;
+  total: number;
+  school: number;
+  center: number;
+  other: number;
+  bounds: [[number, number], [number, number]];
+};
+
+const CELL_PX = 70; // 화면에서 이 거리 안의 기관은 하나로 묶음
+const NO_CLUSTER_ZOOM = 16; // 이만큼 확대하면 묶지 않고 하나씩
+
+/** 화면 격자로 가까운 기관을 묶는다. 선택된 기관과 혼자 있는 기관은 그대로 보여 준다. */
+function clusterOrgs(orgs: MapOrg[], m: LeafletMap, selectedId: number | null) {
+  if (m.getZoom() >= NO_CLUSTER_ZOOM) return { singles: orgs, groups: [] as Group[] };
+  const cells = new Map<string, MapOrg[]>();
+  const singles: MapOrg[] = [];
+  for (const o of orgs) {
+    if (o.id === selectedId) {
+      singles.push(o);
+      continue;
+    }
+    const p = m.project([o.lat, o.lng], m.getZoom());
+    const key = `${Math.floor(p.x / CELL_PX)}:${Math.floor(p.y / CELL_PX)}`;
+    const list = cells.get(key);
+    if (list) list.push(o);
+    else cells.set(key, [o]);
+  }
+  const groups: Group[] = [];
+  for (const list of cells.values()) {
+    if (list.length === 1) {
+      singles.push(list[0]);
+      continue;
+    }
+    const lats = list.map((o) => o.lat);
+    const lngs = list.map((o) => o.lng);
+    groups.push({
+      lat: lats.reduce((a, b) => a + b, 0) / list.length,
+      lng: lngs.reduce((a, b) => a + b, 0) / list.length,
+      total: list.length,
+      school: list.filter((o) => o.kind === "school").length,
+      center: list.filter((o) => o.kind === "community_center").length,
+      other: list.filter((o) => o.kind === "other").length,
+      bounds: [
+        [Math.min(...lats), Math.min(...lngs)],
+        [Math.max(...lats), Math.max(...lngs)],
+      ],
+    });
+  }
+  return { singles, groups };
+}
+
 /** 키가 필요 없는 지도 (OpenStreetMap). KakaoMap 과 같은 사용법. */
 export default function OsmMap({
   orgs,
@@ -84,11 +137,43 @@ export default function OsmMap({
     };
   }, []);
 
+  // 지도를 움직이거나 확대·축소하면 묶음을 다시 계산
+  const [view, setView] = useState(0);
+  useEffect(() => {
+    const m = map.current;
+    if (!ready || !m) return;
+    const bump = () => setView((v) => v + 1);
+    m.on("zoomend moveend", bump);
+    return () => {
+      m.off("zoomend moveend", bump);
+    };
+  }, [ready]);
+
   useEffect(() => {
     const leaflet = L.current;
-    if (!ready || !leaflet || !map.current) return;
+    const m = map.current;
+    if (!ready || !leaflet || !m) return;
     markers.current.forEach((mk) => mk.remove());
-    markers.current = orgs.map((o) => {
+    const { singles, groups } = clusterOrgs(orgs, m, selectedId);
+    const groupMarkers = groups.map((g) => {
+      const parts = [
+        g.school ? `🏫 ${g.school}` : "",
+        g.center ? `🏛 ${g.center}` : "",
+        g.other ? `🏢 ${g.other}` : "",
+      ].filter(Boolean);
+      const size = g.total >= 100 ? 15 : 13;
+      const icon = leaflet.divIcon({
+        className: "",
+        html: `<span style="transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;border-radius:9999px;border:2px solid #fff;background:#0f766e;color:#fff;font-weight:700;font-size:${size}px;padding:4px 11px;box-shadow:0 2px 8px rgb(13 27 51 / .4)">${parts.join(" · ")}</span>`,
+        iconSize: [0, 0],
+      });
+      const label = `이 근처 학교 ${g.school}곳, 주민센터 ${g.center}곳${g.other ? `, 기타 ${g.other}곳` : ""}. 눌러서 확대`;
+      const mk = leaflet.marker([g.lat, g.lng], { icon, title: label, alt: label, keyboard: true }).addTo(m);
+      mk.on("click", () => m.fitBounds(g.bounds, { padding: [40, 40], maxZoom: 17 }));
+      mk.getElement()?.setAttribute("aria-label", label);
+      return mk;
+    });
+    markers.current = [...groupMarkers, ...singles.map((o) => {
       const available = o.available_now > 0;
       const selected = o.id === selectedId;
       const cls = [
@@ -120,8 +205,8 @@ export default function OsmMap({
         `${escapeHtml(o.name)}, 지금 빌릴 수 있는 물품 ${o.available_now}개`,
       );
       return mk;
-    });
-  }, [orgs, ready, selectedId]);
+    })];
+  }, [orgs, ready, selectedId, view]);
 
   useEffect(() => {
     if (!ready || !focus || !map.current) return;

@@ -115,7 +115,7 @@ export default function Profile() {
             <dt className="font-semibold text-navy-600">권한</dt>
             <dd>
               {user.role === "admin"
-                ? "서비스 관리자"
+                ? "최고 관리자"
                 : user.is_staff
                   ? "기관 관리자"
                   : "일반 회원"}

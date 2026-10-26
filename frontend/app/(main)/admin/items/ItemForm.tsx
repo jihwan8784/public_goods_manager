@@ -102,7 +102,6 @@ export default function ItemForm({
   function validate(): boolean {
     const e: typeof errors = {};
     if (!v.org_id) e.org_id = "물품을 관리할 기관을 선택해 주세요.";
-    if (!/^[A-Za-z0-9][A-Za-z0-9\-_]{1,39}$/.test(v.asset_code.trim())) e.asset_code = "영문·숫자·-·_ 로 2~40자 (예: MIC-001)";
     if (!v.name.trim()) e.name = "물품명을 입력해 주세요.";
     if (!v.category.trim()) e.category = "카테고리를 입력해 주세요.";
     setErrors(e);
@@ -231,7 +230,18 @@ export default function ItemForm({
             </label>
             {errors.org_id && <span className="text-xs font-semibold text-rose-800 sm:col-span-2">{errors.org_id}</span>}
             {field("name", "물품명 (종류)", { placeholder: "예: 무선 마이크", maxLength: 80, required: true })}
-            {field("asset_code", "개별 관리번호", { placeholder: "예: MIC-004", maxLength: 40, required: true, className: `${inputCls} font-mono uppercase` })}
+            <div className={labelCls}>
+              <span>관리번호</span>
+              {item ? (
+                <span className="rounded-lg border border-navy-100 bg-navy-50 px-3 py-2 font-mono text-navy-800">
+                  {item.asset_code}
+                </span>
+              ) : (
+                <span className="rounded-lg border border-dashed border-navy-200 px-3 py-2 text-sm font-normal text-navy-600">
+                  등록하면 기관별로 순서대로 자동 부여됩니다 (0001, 0002 …)
+                </span>
+              )}
+            </div>
             <label className={labelCls}>
               카테고리
               <input value={v.category} onChange={set("category")} list="category-list" className={inputCls} aria-invalid={!!errors.category} maxLength={40} required />

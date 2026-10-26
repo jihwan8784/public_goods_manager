@@ -170,11 +170,13 @@ def test_org_admin_scope(world, db, users):
     assert ga.post("/admin/items", json=body).status_code == 403
     upd = {**body, "status": "repair"}
     assert ga.put(f"/admin/items/{world['hanbit_item'].id}", json=upd).status_code == 404
-    # 자기 기관에는 등록 가능, 관리번호는 기관마다 따로
-    ok = ga.post("/admin/items", json={**body, "org_id": world["gaon"].id, "asset_code": "MIC-002"})
-    assert ok.status_code == 201
-    dup = ga.post("/admin/items", json={**body, "org_id": world["gaon"].id, "asset_code": "mic-001"})
-    assert dup.status_code == 409
+    # 자기 기관에는 등록 가능, 관리번호는 기관마다 순서대로 자동 부여 (보낸 번호는 무시)
+    ok = ga.post("/admin/items", json={**body, "org_id": world["gaon"].id, "asset_code": "MIC-001"})
+    assert ok.status_code == 201 and ok.json()["item"]["asset_code"] == "0001"
+    ok2 = ga.post("/admin/items", json={"org_id": world["gaon"].id, "name": "y", "category": "y"})
+    assert ok2.json()["item"]["asset_code"] == "0002"
+    other = world["hanbit_admin"].post("/admin/items", json={"org_id": world["hanbit"].id, "name": "z", "category": "z"})
+    assert other.json()["item"]["asset_code"] == "0001"  # 다른 기관은 따로 1번부터
     # 기관 관리자는 서비스 관리자 기능(회원·기관) 사용 불가
     assert ga.get("/admin/users").status_code == 403
     assert ga.get("/admin/orgs").status_code == 403

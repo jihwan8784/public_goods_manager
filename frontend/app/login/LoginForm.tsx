@@ -27,6 +27,8 @@ export default function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [unverified, setUnverified] = useState(false);
+  const [needCode, setNeedCode] = useState(false);
+  const [adminCode, setAdminCode] = useState("");
   const [busy, setBusy] = useState(false);
   const verified = params.get("verified") === "1";
   const reset = params.get("reset") === "1";
@@ -39,15 +41,28 @@ export default function LoginForm() {
       setError("아이디와 비밀번호를 모두 입력해 주세요.");
       return;
     }
+    if (needCode && !adminCode.trim()) {
+      setError("관리자 비밀 코드를 입력해 주세요.");
+      return;
+    }
     setBusy(true);
     try {
-      await api("/auth/login", { body: { email, password }, noRedirect: true });
+      await api("/auth/login", {
+        body: { email, password, admin_code: needCode ? adminCode : undefined },
+        noRedirect: true,
+      });
       window.location.assign(safeNext(params.get("next")));
     } catch (err) {
-      setError(errorMessage(err));
-      setUnverified(
-        err instanceof ApiError && err.code === "email_not_verified",
-      );
+      const code = err instanceof ApiError ? err.code : undefined;
+      if (code === "admin_code_required") {
+        // 관리자 계정: 비밀 코드 칸을 보여 주고 안내만 한다
+        setNeedCode(true);
+        setError("");
+      } else {
+        setError(errorMessage(err));
+      }
+      if (code === "admin_code_invalid") setAdminCode("");
+      setUnverified(code === "email_not_verified");
       setBusy(false);
     }
   }
@@ -104,6 +119,23 @@ export default function LoginForm() {
             required
           />
         </label>
+        {needCode && (
+          <label className={labelCls}>
+            관리자 비밀 코드
+            <input
+              type="password"
+              autoComplete="off"
+              value={adminCode}
+              onChange={(e) => setAdminCode(e.target.value)}
+              className={inputCls}
+              aria-describedby="admin-code-help"
+              autoFocus
+            />
+            <span id="admin-code-help" className="text-xs font-normal text-navy-600">
+              관리자 계정은 비밀번호와 함께 관리자 비밀 코드가 필요합니다. 5번 틀리면 15분 동안 잠깁니다.
+            </span>
+          </label>
+        )}
         {error && (
           <p
             role="alert"
@@ -151,7 +183,7 @@ export default function LoginForm() {
               className={btn.small}
               onClick={() => fill("admin@pgm.test", "admin1234!")}
             >
-              서비스 관리자
+              최고 관리자
             </button>
             <button
               type="button"

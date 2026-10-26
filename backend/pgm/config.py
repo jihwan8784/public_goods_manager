@@ -67,5 +67,10 @@ VERIFY_TOKEN_HOURS = 24
 RESET_TOKEN_MINUTES = 60
 RESEND_COOLDOWN_SECONDS = 60  # 같은 사람에게 인증 메일을 다시 보내는 최소 간격
 
+# 관리자(최고·기관 관리자) 로그인 비밀 코드. 비우면 코드 확인을 하지 않는다.
+ADMIN_ACCESS_CODE = os.getenv("ADMIN_ACCESS_CODE", "").strip()
+ADMIN_CODE_MAX_FAILURES = 5  # 연속으로 틀리면
+ADMIN_CODE_LOCK_MINUTES = 15  # 이 시간 동안 관리자 로그인 잠금
+
 # 학생 연령 확인
 MIN_SIGNUP_AGE = 14  # 개인정보보호법: 만 14세 미만은 보호자 동의가 필요해 가입을 받지 않음

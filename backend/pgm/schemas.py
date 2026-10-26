@@ -14,6 +14,8 @@ from .timeutil import now_utc
 class LoginIn(BaseModel):
     email: str = Field(min_length=3, max_length=120)
     password: str = Field(min_length=1, max_length=72)
+    # 관리자(최고·기관) 로그인 때 필요한 비밀 코드
+    admin_code: str | None = Field(default=None, max_length=200)
 
 
 class ReservationIn(BaseModel):
@@ -51,7 +53,8 @@ class ReportUpdateIn(BaseModel):
 class ItemIn(BaseModel):
     org_id: int
     access: str = Field(default="public", pattern="^(public|members)$")
-    asset_code: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9\-_]*$")
+    # 관리번호는 서버가 자동으로 매긴다. 예전 화면이 보내도 무시한다.
+    asset_code: str | None = Field(default=None, max_length=40)
     name: str = Field(min_length=1, max_length=80)
     category: str = Field(min_length=1, max_length=40)
     description: str = Field(default="", max_length=4000)
@@ -67,7 +70,8 @@ class UserCreateIn(BaseModel):
     email: str = Field(min_length=3, max_length=120, pattern=r"^[^@\s]+@[^@\s]+$")
     name: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=8, max_length=72)
-    role: str = Field(default="user", pattern="^(user|admin)$")
+    # 지정하면 이 기관의 관리자로 만든다 (최고 관리자는 새로 만들 수 없음)
+    org_id: int | None = None
 
 
 class SignupIn(BaseModel):
@@ -110,7 +114,6 @@ class OrgAdminIn(BaseModel):
 
 
 class UserUpdateIn(BaseModel):
-    role: str | None = Field(default=None, pattern="^(user|admin)$")
     password: str | None = Field(default=None, min_length=8, max_length=72)
     verify_email: bool | None = None
 

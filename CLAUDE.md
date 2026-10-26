@@ -45,11 +45,13 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 알림은 화면 표시만. 문자·이메일·푸시를 보냈다고 표시하지 말 것.
 
 ## 기관·회원 규칙
-- 역할: `role=admin` 은 서비스 관리자(전체 + 기관·회원 관리). 기관 관리자는 `pgm_org_admin` 으로 지정, 자기 기관 물품·예약·신고·학생 승인만.
+- 역할: `role=admin` 은 최고 관리자(전체 + 기관·회원 관리). 화면·API 로 최고 관리자를 만들거나 뺄 수 없음(`role` 변경 없음). 관리자 권한은 항상 기관을 지정해 `pgm_org_admin` 으로 줌(기관 관리자: 자기 기관 물품·예약·신고·학생 승인만).
+- 관리자(최고·기관) 로그인은 `ADMIN_ACCESS_CODE` 비밀 코드 필요(비우면 확인 안 함). 5회 틀리면 15분 잠금(`admin_code_failures/locked_until`). 비밀번호가 맞을 때만 코드 요구를 알림.
 - 관리 범위 검사는 서버에서: 목록은 `managed_org_ids` 로 필터, 상태 변경은 services 의 `_ensure_manager`.
 - 물품 `access`: `public`(로그인 회원 누구나) / `members`(그 학교의 승인된 학생만). 자격은 `access.eligibility` 한 곳에서 판단. 신청 때와 승인 때 모두 검사.
 - 회원가입은 누구나. 학생이면 학교(NEIS 목록) + 학번 → `pending` → 그 학교 관리자가 승인/거절(사유 필수). 학교를 바꾸면 다시 `pending`.
-- 관리번호는 기관별 고유 (`uq_pgm_item_org_code`).
+- 관리번호는 기관별 고유 (`uq_pgm_item_org_code`), 서버가 자동 부여(`routes.next_asset_code`: 기관 행 잠금 후 숫자 번호 최댓값+1, 0001 형식). 입력받지 않음. 다른 기관으로 옮기면 새 번호.
+- 지도(OSM)는 화면 70px 격자로 가까운 기관을 묶어 종류별 개수 표시, 줌 16 이상은 개별 표시. 지도 위 이름·주소 검색(`/orgs/search`).
 - 기관 목록: 학교는 NEIS(`NEIS_API_KEY`) 매일 동기화, 목록에서 빠진 학교는 비활성(삭제 안 함). 주민센터는 CSV 가져오기. 좌표는 카카오(`KAKAO_REST_API_KEY`), 직접 지정한 좌표(`manual`)는 동기화가 덮어쓰지 않음.
 - 실시간: 서버리스라 웹소켓 대신 화면별 15~20초 자동 갱신(`useLoad(path, { refreshMs })`, 탭 숨김 시 중지).
 - 지도: 기본은 키가 필요 없는 OpenStreetMap(Leaflet, `components/OsmMap.tsx`). `NEXT_PUBLIC_KAKAO_MAP_KEY` 가 있으면 카카오맵, 불러오기 실패 시 OSM 으로 대체.

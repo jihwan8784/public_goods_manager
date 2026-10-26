@@ -14,9 +14,90 @@ import {
   Loading,
   PageHeader,
 } from "@/components/ui";
+import { api } from "@/lib/api";
 import { ORG_KIND_ICON, ORG_KIND_LABEL } from "@/lib/labels";
-import type { MapOrg, OrgKind } from "@/lib/types";
+import type { MapOrg, OrgBrief, OrgKind } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
+
+type SearchHit = OrgBrief & { address: string };
+
+/** 기관 이름·주소로 찾아서 지도에서 그 위치로 이동 */
+function MapSearch({ kind, onPick }: { kind: "" | OrgKind; onPick: (h: SearchHit) => void }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+
+  async function search(e: React.FormEvent) {
+    e.preventDefault();
+    const term = q.trim();
+    if (term.length < 2) {
+      setHits(null);
+      setState("error");
+      return;
+    }
+    setState("loading");
+    try {
+      const params = new URLSearchParams({ q: term, limit: "20" });
+      if (kind) params.set("kind", kind);
+      const r = await api<{ orgs: SearchHit[] }>(`/orgs/search?${params}`);
+      setHits(r.orgs);
+      setState("idle");
+    } catch {
+      setHits(null);
+      setState("error");
+    }
+  }
+
+  return (
+    <div className="mb-3">
+      <form role="search" onSubmit={search} className="flex gap-2">
+        <label className="sr-only" htmlFor="map-search">
+          기관 이름이나 주소로 찾기
+        </label>
+        <input
+          id="map-search"
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="학교·주민센터 이름이나 주소로 찾기 (예: 가온고, 서교동)"
+          className={`${inputBase} min-w-0 flex-1`}
+        />
+        <button type="submit" className={btn.primary} disabled={state === "loading"}>
+          {state === "loading" ? "찾는 중…" : "검색"}
+        </button>
+      </form>
+      <div aria-live="polite">
+        {state === "error" && (
+          <p className="mt-1 text-sm font-semibold text-rose-800">
+            {q.trim().length < 2 ? "2글자 이상 입력해 주세요." : "검색하지 못했습니다. 잠시 후 다시 시도해 주세요."}
+          </p>
+        )}
+        {hits && hits.length === 0 && <p className="mt-1 text-sm text-navy-600">검색 결과가 없습니다.</p>}
+        {hits && hits.length > 0 && (
+          <ul className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-navy-100 bg-white shadow-sm">
+            {hits.map((h) => (
+              <li key={h.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPick(h);
+                    setHits(null);
+                  }}
+                  className="block w-full border-b border-navy-50 px-3 py-2 text-left text-sm hover:bg-navy-50 focus:bg-navy-50"
+                >
+                  <span aria-hidden>{ORG_KIND_ICON[h.kind]} </span>
+                  <span className="font-semibold">{h.name}</span>
+                  {h.lat == null && <span className="ml-1 text-xs text-amber-800">(위치 미등록)</span>}
+                  <span className="block text-xs text-navy-600">{h.address || h.region}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function OrgMap() {
   const user = useUser();
@@ -43,6 +124,7 @@ export default function OrgMap() {
   );
   const [geoMsg, setGeoMsg] = useState("");
   const focusSeq = useRef(0);
+  const [searched, setSearched] = useState<SearchHit | null>(null);
 
   const b = bounds;
   const qs = b
@@ -52,6 +134,7 @@ export default function OrgMap() {
         ne_lat: String(b.ne_lat),
         ne_lng: String(b.ne_lng),
         with_items: String(withItems),
+        limit: "3000",
         ...(kind ? { kind } : {}),
       })
     : null;
@@ -87,7 +170,16 @@ export default function OrgMap() {
 
   function pick(o: MapOrg) {
     setSelectedId(o.id);
+    setSearched(null);
     setFocus({ lat: o.lat, lng: o.lng, key: ++focusSeq.current });
+  }
+
+  function pickSearch(h: SearchHit) {
+    setSearched(h);
+    setSelectedId(h.id);
+    if (h.lat != null && h.lng != null) {
+      setFocus({ lat: h.lat, lng: h.lng, level: 5, key: ++focusSeq.current });
+    }
   }
 
   return (
@@ -97,6 +189,7 @@ export default function OrgMap() {
         desc="학교·주민센터를 지도에서 고르고, 그 기관에서 빌릴 수 있는 물품을 확인하세요. 표시: 지금 빌릴 수 있는 수 / 전체 물품 수"
         actions={<LiveBadge updatedAt={updatedAt} />}
       />
+      <MapSearch kind={kind} onPick={pickSearch} />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="map-kind">
           기관 종류
@@ -171,6 +264,30 @@ export default function OrgMap() {
           )}
         </div>
         <div className="grid content-start gap-3">
+          {!selected && searched && searched.id === selectedId && (
+            <section className="rounded-xl border-2 border-navy-900 bg-white p-4 shadow-sm" aria-live="polite">
+              <p className="text-xs font-semibold text-navy-600">
+                {ORG_KIND_ICON[searched.kind]} {ORG_KIND_LABEL[searched.kind]} {searched.subtype && `· ${searched.subtype}`}
+              </p>
+              <h2 className="text-lg font-bold">{searched.name}</h2>
+              <p className="text-sm text-navy-700">{searched.address}</p>
+              <p className="mt-2 text-sm text-navy-700">
+                {searched.lat == null
+                  ? "아직 지도 위치가 등록되지 않은 기관입니다."
+                  : withItems
+                    ? "등록된 물품이 없어 지도에 표시되지 않았을 수 있습니다."
+                    : ""}
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Link href={`/items?org=${searched.id}`} className={btn.primary}>
+                  이 기관 물품 보기
+                </Link>
+                <button type="button" className={btn.secondary} onClick={() => setSearched(null)}>
+                  닫기
+                </button>
+              </div>
+            </section>
+          )}
           {selected && (
             <section
               className="rounded-xl border-2 border-navy-900 bg-white p-4 shadow-sm"

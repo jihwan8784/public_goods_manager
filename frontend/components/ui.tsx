@@ -119,7 +119,7 @@ export function Forbidden() {
   return (
     <div role="alert" className="mx-auto max-w-lg rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-950">
       <h1 className="text-lg font-bold">접근 권한이 없습니다</h1>
-      <p className="mt-2 text-sm">이 화면을 사용할 권한이 없습니다. 기관 관리자 지정이 필요하면 서비스 관리자에게 문의해 주세요.</p>
+      <p className="mt-2 text-sm">이 화면을 사용할 권한이 없습니다. 기관 관리자 지정이 필요하면 최고 관리자에게 문의해 주세요.</p>
       <Link href="/" className={`${btn.secondary} mt-4`}>
         홈으로
       </Link>

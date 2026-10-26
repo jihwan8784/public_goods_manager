@@ -97,7 +97,7 @@ function Shell({ children }: { children: ReactNode }) {
               {user.name}
               {(isSuper || user.is_staff) && (
                 <span className="ml-1.5 rounded bg-teal-500 px-1.5 py-0.5 text-xs font-bold text-navy-900">
-                  {isSuper ? "서비스 관리자" : "기관 관리자"}
+                  {isSuper ? "최고 관리자" : "기관 관리자"}
                 </span>
               )}
             </span>

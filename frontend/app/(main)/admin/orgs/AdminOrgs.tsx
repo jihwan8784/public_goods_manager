@@ -40,6 +40,7 @@ type SyncStatus = {
   neis_key: boolean;
   kakao_key: boolean;
   cron_secret: boolean;
+  admin_code: boolean;
 };
 type OrgRow = OrgFull & {
   items: number;
@@ -110,7 +111,16 @@ export default function AdminOrgs() {
                   ok={s.cron_secret}
                   label="매일 자동 실행 (CRON_SECRET)"
                 />
+                <KeyRow
+                  ok={s.admin_code}
+                  label="관리자 로그인 비밀 코드 (ADMIN_ACCESS_CODE)"
+                />
               </ul>
+              {!s.admin_code && (
+                <p role="alert" className="rounded-md bg-amber-50 px-3 py-2 text-amber-950">
+                  관리자 비밀 코드가 설정되지 않아 관리자도 비밀번호만으로 로그인됩니다. API 프로젝트 환경변수 ADMIN_ACCESS_CODE 를 설정해 주세요.
+                </p>
+              )}
               <p>
                 등록된 기관: 학교 {s.orgs_by_kind.school ?? 0}곳 · 주민센터{" "}
                 {s.orgs_by_kind.community_center ?? 0}곳 · 기타{" "}

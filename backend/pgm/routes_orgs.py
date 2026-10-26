@@ -88,7 +88,7 @@ def orgs_map(
     ne_lng: float,
     kind: str | None = Query(default=None, pattern="^(school|community_center|other)$"),
     with_items: bool = True,
-    limit: int = Query(default=300, ge=1, le=500),
+    limit: int = Query(default=300, ge=1, le=3000),
 ):
     if sw_lat > ne_lat or sw_lng > ne_lng:
         raise HTTPException(422, "지도 범위가 올바르지 않습니다.")
@@ -296,6 +296,7 @@ def sync_status(admin: AdminUser, session: SessionDep):
         "neis_key": bool(config.NEIS_API_KEY),
         "kakao_key": bool(config.KAKAO_REST_API_KEY),
         "cron_secret": bool(config.CRON_SECRET),
+        "admin_code": bool(config.ADMIN_ACCESS_CODE),
     }
 
 

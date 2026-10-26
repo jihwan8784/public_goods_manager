@@ -404,14 +404,21 @@ def admin_create_user(body: UserCreateIn, admin: AdminUser, session: SessionDep)
     email = body.email.strip().lower()
     if session.exec(select(User).where(User.email == email)).first():
         raise HTTPException(409, "이미 등록된 아이디(이메일)입니다.")
+    org = None
+    if body.org_id is not None:
+        org = session.get(Organization, body.org_id)
+        if not org:
+            raise HTTPException(422, "관리할 기관을 다시 선택해 주세요.")
     u = User(
         email=email,
         name=body.name.strip(),
         password_hash=hash_password(body.password),
-        role=body.role,
         email_verified_at=now_utc(),  # 관리자가 직접 만든 계정은 인증된 것으로 본다
     )
     session.add(u)
+    session.flush()
+    if org:
+        session.add(OrgAdmin(org_id=org.id, user_id=u.id))
     session.commit()
     session.refresh(u)
     return {"user": me_out_light(u)}
@@ -419,13 +426,11 @@ def admin_create_user(body: UserCreateIn, admin: AdminUser, session: SessionDep)
 
 @router.patch("/admin/users/{user_id}")
 def admin_update_user(user_id: int, body: UserUpdateIn, admin: AdminUser, session: SessionDep):
+    """비밀번호 변경·이메일 인증 처리. 최고 관리자 권한은 화면에서 주거나 뺄 수 없다.
+    관리자 권한은 기관 단위로 준다 (POST/DELETE /admin/orgs/{org_id}/admins)."""
     u = session.get(User, user_id)
     if not u:
         raise HTTPException(404, "사용자를 찾을 수 없습니다.")
-    if body.role and body.role != u.role:
-        if u.id == admin.id:
-            raise HTTPException(409, "자기 자신의 관리자 권한은 해제할 수 없습니다.")
-        u.role = body.role
     if body.password:
         u.password_hash = hash_password(body.password)
     if body.verify_email and u.email_verified_at is None:

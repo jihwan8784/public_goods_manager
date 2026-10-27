@@ -57,6 +57,12 @@ export default function ItemList() {
   const availableOnly = params.get("available") === "1";
 
   const [qInput, setQInput] = useState(q);
+  // 머리말 검색으로 주소의 검색어가 바뀌면 입력칸도 맞춘다
+  const [shownQ, setShownQ] = useState(q);
+  if (shownQ !== q) {
+    setShownQ(q);
+    setQInput(q);
+  }
   const initial = defaultSlot();
   const fromParam = (iso: string | null, which: "start" | "end") => {
     if (!iso) return null;

@@ -39,6 +39,7 @@ from .models import (
     Organization,
     Reservation,
     User,
+    get_item,
 )
 from .timeutil import fmt_seoul, now_utc, to_utc
 
@@ -163,7 +164,7 @@ def create_reservation(
     purpose = purpose.strip()
     if len(purpose) < 2:
         raise RuleError(422, "사용 목적을 2자 이상 입력해 주세요.")
-    item = session.get(Item, item_id)
+    item = get_item(session, item_id)
     if not item:
         raise _not_found("물품")
     ok, reason = eligibility(user, item, session.get(Organization, item.org_id) if item.org_id else None)
@@ -189,7 +190,7 @@ def _lock_reservation(session: Session, reservation_id: int) -> Reservation:
 
 
 def _lock_item(session: Session, item_id: int) -> Item:
-    item = session.exec(select(Item).where(Item.id == item_id).with_for_update()).first()
+    item = get_item(session, item_id, lock=True)
     if not item:
         raise _not_found("물품")
     return item
@@ -219,7 +220,7 @@ def cancel_reservation(session: Session, actor: User, reservation_id: int, reaso
     r = _lock_reservation(session, reservation_id)
     is_owner = r.user_id == actor.id
     if not is_owner:
-        item = session.get(Item, r.item_id)
+        item = get_item(session, r.item_id)
         if not can_manage(session, actor, item.org_id if item else None):
             session.rollback()
             raise _not_found()  # 다른 사람 예약의 존재 여부를 알리지 않는다
@@ -284,7 +285,7 @@ def reject_reservation(session: Session, admin: User, reservation_id: int, reaso
     if not reason:
         raise RuleError(422, "거절 사유를 입력해 주세요.")
     r = _lock_reservation(session, reservation_id)
-    _ensure_manager(session, admin, session.get(Item, r.item_id))
+    _ensure_manager(session, admin, get_item(session, r.item_id))
     if r.status != R_PENDING:
         session.rollback()
         raise _bad_state(r, "거절")
@@ -301,15 +302,24 @@ def reject_reservation(session: Session, admin: User, reservation_id: int, reaso
 # ---------------------------------------------------------------- 관리자: 인계(대여 시작)
 
 
-def checkout_blockers(session: Session, r: Reservation, item: Item, now: datetime | None = None) -> list[str]:
-    """대여 시작을 막는 사유 목록 (화면 경고에도 사용)."""
+def checkout_blockers(
+    session: Session,
+    r: Reservation,
+    item: Item,
+    now: datetime | None = None,
+    unreturned: list[Reservation] | None = None,
+) -> list[str]:
+    """대여 시작을 막는 사유 목록 (화면 경고에도 사용).
+    unreturned: 목록 화면에서 미리 한 번에 읽어 둔 이 물품의 미반납 대여 (없으면 DB 에서 읽음)."""
     now = now or now_utc()
     reasons: list[str] = []
     if item.status == ITEM_REPAIR:
         reasons.append("물품이 수리 중입니다.")
     if item.status == ITEM_RETIRED:
         reasons.append("보관 종료된 물품입니다.")
-    for other in unreturned_rentals(session, item.id, exclude_id=r.id):
+    if unreturned is None:
+        unreturned = unreturned_rentals(session, item.id, exclude_id=r.id)
+    for other in (o for o in unreturned if o.id != r.id):
         reasons.append(
             f"이전 대여(#{other.id}, 반납 기한 {fmt_seoul(other.end_at)})가 아직 반납 완료되지 않았습니다."
         )
@@ -374,7 +384,7 @@ def complete_return(
         raise RuleError(422, "반납 상태(정상/수리 필요)를 선택해 주세요.")
     note = (note or "").strip()[:300] or None
     r = _lock_reservation(session, reservation_id)
-    _ensure_manager(session, admin, session.get(Item, r.item_id))
+    _ensure_manager(session, admin, get_item(session, r.item_id))
     if r.status == R_RETURNED:
         session.rollback()
         raise RuleError(409, "이미 반납 완료된 대여입니다.")
@@ -420,7 +430,7 @@ def create_report(
     description = (description or "").strip()
     if len(description) < 5:
         raise RuleError(422, "고장·파손 내용을 5자 이상 입력해 주세요.")
-    item = session.get(Item, item_id)
+    item = get_item(session, item_id)
     if not item:
         raise _not_found("물품")
     if reservation_id is not None:
@@ -464,7 +474,7 @@ def update_report(
     ).first()
     if not report:
         raise _not_found("고장 신고")
-    _ensure_manager(session, admin, session.get(Item, report.item_id))
+    _ensure_manager(session, admin, get_item(session, report.item_id))
     if status == REPORT_RECEIVED and report.status != REPORT_RECEIVED:
         session.rollback()
         raise RuleError(409, "처리를 시작한 신고는 접수 상태로 되돌릴 수 없습니다.")
@@ -474,7 +484,7 @@ def update_report(
     report.handled_by = admin.id
     report.updated_at = now_utc()
     affected: list[Reservation] = []
-    item = session.get(Item, report.item_id)
+    item = get_item(session, report.item_id)
     if item_action == "set_repair":
         if item.status == ITEM_RETIRED:
             session.rollback()

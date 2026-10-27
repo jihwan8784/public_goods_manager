@@ -71,3 +71,6 @@ npm run dev | npm run build | npx tsc --noEmit | npm run lint
 - 계정 중지·삭제는 최고 관리자만 (/admin/users/{id}/suspend|unsuspend, DELETE /admin/users/{id}). 최고 관리자·자기 자신은 대상 불가. 중지되면 기존 세션도 즉시 401. 삭제: 미반납 대여 있으면 거부, 대기·확정 예약 취소, 기록이 있으면 익명화(기록 보존), 없으면 완전 삭제.
 - 소유자 계정(`OWNER_EMAIL`, 기본 jihwan8784@kakao.com): 다른 관리자가 바꾸거나 중지·삭제·해제 불가. 최고 관리자 지정·해제(`grant-super`/`revoke-super`)는 소유자만 + `ADMIN_ACCESS_CODE` 입력.
 - 성능: 물품 목록(`/items`, `/admin/items`)은 DB 에서 거르고 limit/offset 으로 나눠 줌(`total`,`has_more`). 목록 조회는 `ITEM_LIGHT`(사진 bytea 제외). `useLoad` 는 결과가 같으면 다시 그리지 않음. API 는 DB 와 같은 싱가포르(`vercel.json` regions sin1). `init_db` 는 `pgm_meta.schema_version` 이 `SCHEMA_VERSION` 과 같으면 건너뜀 → 구조를 바꾸면 숫자를 올릴 것.
+- 물품 한 개는 `models.get_item`(사진 bytea 제외)으로 읽음. 사진 본문은 `/items/{id}/image` 만. 목록 경고(충돌·인계 차단·대시보드)는 행마다 질의하지 말고 한 번에 읽어 계산.
+- 프론트 `useLoad` 는 주소별 결과를 메모리에 기억(`lib/loadCache.ts`) → 이미 본 화면은 바로 표시 후 뒤에서 갱신. 저장·변경(GET 외) 성공 시 통째로 비움. 로그인 사용자 정보는 탭의 sessionStorage(`pgm.me`)에 기억해 새로고침 때 먼저 표시, 뒤에서 `/auth/me` 재확인(권한은 서버가 판단).
+- 테스트는 bcrypt rounds 4 (`APP_ENV=test`), 운영 12.

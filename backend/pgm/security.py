@@ -12,10 +12,12 @@ from .models import ROLE_ADMIN, User
 from .timeutil import now_utc
 
 ALGORITHM = "HS256"
+# 테스트에서만 낮춘다 (운영 기본 12). 낮을수록 빠르지만 비밀번호 보호가 약해진다.
+BCRYPT_ROUNDS = 4 if config.APP_ENV == "test" else 12
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(BCRYPT_ROUNDS)).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:

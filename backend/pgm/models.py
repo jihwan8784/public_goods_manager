@@ -1,7 +1,8 @@
 from datetime import date, datetime
 
 from sqlalchemy import Column, Date, DateTime, Float, Index, LargeBinary, String, Text, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlalchemy.orm import defer
+from sqlmodel import Field, SQLModel, select
 
 from .timeutil import now_utc
 
@@ -229,3 +230,17 @@ class DamageReport(SQLModel, table=True):
     updated_at: datetime = Field(
         default_factory=now_utc, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
+
+
+# 사진 본문(bytea)은 사진 주소(/items/{id}/image)에서만 읽는다. 다른 조회는 모두 이것을 쓴다.
+ITEM_LIGHT = defer(Item.image_data)  # type: ignore[arg-type]
+
+
+def get_item(session, item_id: int | None, lock: bool = False) -> "Item | None":
+    """사진 본문을 빼고 물품 한 개를 읽는다. lock=True 면 FOR UPDATE."""
+    if item_id is None:
+        return None
+    q = select(Item).options(ITEM_LIGHT).where(Item.id == item_id)
+    if lock:
+        q = q.with_for_update()
+    return session.exec(q).first()

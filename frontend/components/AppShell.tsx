@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import Logo from "./Logo";
 import { btn, ErrorState, Forbidden, Loading } from "./ui";
-import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
+import { APP_NAME, APP_NAME_PARTS, APP_TAGLINE } from "@/lib/brand";
 
 const USER_NAV = [
   { href: "/", label: "홈" },
@@ -116,10 +116,10 @@ function Shell({ children }: { children: ReactNode }) {
       <header className="no-print sticky top-0 z-40 border-b border-navy-100 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
           <Link href="/" className="flex shrink-0 items-center gap-2 text-lg font-extrabold tracking-tight text-navy-900">
-            <Logo size={34} className="rounded-lg" />
+            <Logo size={34} className="rounded-[10px]" />
             <span>
-              {APP_NAME.slice(0, 2)}
-              <span className="text-teal-700">{APP_NAME.slice(2)}</span>
+              {APP_NAME_PARTS[0]}
+              <span className="text-teal-700">{APP_NAME_PARTS[1]}</span>
             </span>
           </Link>
           <HeaderSearch className="ml-auto hidden w-full max-w-sm md:flex" />

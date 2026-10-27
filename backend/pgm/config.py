@@ -60,7 +60,7 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")  # 앱 비밀번
 # 선택: SMTP 대신 Resend (내 도메인 인증 필요)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 # 서비스 이름 (메일 제목·보내는 사람 표시). 화면 쪽은 frontend/lib/brand.ts
-APP_NAME = "나눔곳간"
+APP_NAME = "Lendit"
 # 보내는 사람 표시. 비우면 "<APP_NAME> <SMTP_USER>"
 MAIL_FROM = os.getenv("MAIL_FROM", "")
 # 메일 속 링크가 가리킬 사이트 주소 (웹 프로젝트 주소)

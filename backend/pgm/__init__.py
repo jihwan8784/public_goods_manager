@@ -1,1 +1,1 @@
-"""public goods manage — 공동 물품 대여 관리 API."""
+"""나눔곳간 — 공동 물품 대여 관리 API."""

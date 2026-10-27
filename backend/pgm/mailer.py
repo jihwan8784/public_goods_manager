@@ -60,7 +60,7 @@ def send(mail: Mail) -> bool:
 def _from_header() -> str:
     if config.MAIL_FROM:
         return config.MAIL_FROM
-    return formataddr(("public goods manage", config.SMTP_USER))
+    return formataddr((config.APP_NAME, config.SMTP_USER))
 
 
 def _send_smtp(mail: Mail) -> None:
@@ -94,7 +94,7 @@ def _send_smtp(mail: Mail) -> None:
 def _send_resend(mail: Mail) -> None:
     body = json.dumps(
         {
-            "from": config.MAIL_FROM or "public goods manage <onboarding@resend.dev>",
+            "from": config.MAIL_FROM or f"{config.APP_NAME} <onboarding@resend.dev>",
             "to": [mail.to],
             "subject": mail.subject,
             "text": mail.text,
@@ -129,7 +129,7 @@ def _layout(title: str, lines: list[str], button_text: str, url: str, footer: st
     paras = "".join(f'<p style="margin:0 0 12px;line-height:1.6">{line}</p>' for line in lines)
     html = f"""<!doctype html><html lang="ko"><body style="margin:0;background:#f6f8fb;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#0d1b33">
 <div style="max-width:480px;margin:24px auto;background:#fff;border:1px solid #e1e8f2;border-radius:12px;padding:28px">
-<p style="margin:0 0 4px;font-weight:700;color:#0f766e">public goods manage</p>
+<p style="margin:0 0 4px;font-weight:700;color:#0f766e">{config.APP_NAME}</p>
 <h1 style="margin:0 0 16px;font-size:20px">{title}</h1>
 {paras}
 <p style="margin:20px 0"><a href="{url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:8px">{button_text}</a></p>
@@ -148,7 +148,7 @@ def verification_mail(to: str, name: str, url: str) -> Mail:
         url,
         "직접 가입하지 않았다면 이 메일을 무시하세요. 계정은 인증 전까지 사용할 수 없습니다.",
     )
-    return Mail(to, "[public goods manage] 이메일 인증", text, html)
+    return Mail(to, f"[{config.APP_NAME}] 이메일 인증", text, html)
 
 
 def reset_mail(to: str, name: str, url: str) -> Mail:
@@ -159,4 +159,4 @@ def reset_mail(to: str, name: str, url: str) -> Mail:
         url,
         "직접 요청하지 않았다면 이 메일을 무시하세요. 비밀번호는 바뀌지 않습니다.",
     )
-    return Mail(to, "[public goods manage] 비밀번호 재설정", text, html)
+    return Mail(to, f"[{config.APP_NAME}] 비밀번호 재설정", text, html)

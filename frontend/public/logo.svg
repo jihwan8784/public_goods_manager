@@ -1,19 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0d1b33"/>
-  <!-- 주고받기(대여·반납) 화살표 -->
-  <g fill="none" stroke="#2dd4bf" stroke-width="34" stroke-linecap="round">
-    <path d="M96.3 197.9 A170 170 0 0 1 400 186"/>
-    <path d="M415.7 314.1 A170 170 0 0 1 112 326"/>
-  </g>
-  <g fill="#2dd4bf">
-    <polygon points="452,172 430,248 374,196"/>
-    <polygon points="60,340 82,264 138,316"/>
-  </g>
-  <!-- 공용 물품 상자 -->
-  <g stroke-linejoin="round">
-    <polygon points="256,170 332,212 256,254 180,212" fill="#f0fdfa"/>
-    <polygon points="180,212 256,254 256,342 180,300" fill="#99f6e4"/>
-    <polygon points="332,212 256,254 256,342 332,300" fill="#5eead4"/>
-    <polygon points="218,191 294,233 294,262 278,253 278,242 218,209" fill="#0d9488" opacity="0.9"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <!-- 처마가 살짝 들린 곳간 지붕 -->
+  <path d="M7 27.5c6.5.2 13.6-3.2 25-12.5 11.4 9.3 18.5 12.7 25 12.5l-3.4 4.3c-7.2-.6-13.5-4-21.6-10-8.1 6-14.4 9.4-21.6 10z" fill="#fff"/>
+  <!-- 곳간 몸체와 두 짝 문 -->
+  <rect x="17" y="30" width="30" height="21" rx="2.5" fill="#fff" fill-opacity=".96"/>
+  <path d="M32 33.5v14" stroke="#0f766e" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="28.6" cy="41" r="1.6" fill="#0f766e"/>
+  <circle cx="35.4" cy="41" r="1.6" fill="#0f766e"/>
+  <!-- 곳간 위에 뜬 해: 나눔의 따뜻함 -->
+  <circle cx="49.5" cy="13.5" r="3.4" fill="#fcd34d"/>
 </svg>

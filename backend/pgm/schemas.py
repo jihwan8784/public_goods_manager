@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import defer
+
 from sqlmodel import Session, col, select
 
 from .models import DamageReport, Item, Organization, Reservation, User
@@ -9,7 +9,7 @@ from .services import STATUS_LABEL, is_overdue
 from .timeutil import now_utc
 
 # 목록에서는 사진 본문(bytea)을 읽지 않는다. 물품이 많을 때 가장 큰 부담
-ITEM_LIGHT = defer(Item.image_data)
+from .models import ITEM_LIGHT  # noqa: E402,F401  (예전 import 경로 유지)
 
 
 # ---------------------------------------------------------------- 입력

@@ -1,3 +1,5 @@
+import { cacheClear } from "./loadCache";
+
 export class ApiError extends Error {
   status: number;
   /** 서버가 보낸 구분 코드 (예: email_not_verified) */
@@ -65,6 +67,8 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     }
     throw new ApiError(res.status, message, code);
   }
+  const method = opts.method ?? (body ? "POST" : "GET");
+  if (method !== "GET") cacheClear(); // 무언가 바뀌었으니 기억해 둔 화면 결과를 버린다
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

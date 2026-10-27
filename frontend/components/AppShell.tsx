@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import Logo from "./Logo";
 import { btn, ErrorState, Forbidden, Loading } from "./ui";
@@ -35,14 +35,13 @@ function Shell({ children }: { children: ReactNode }) {
   const { user, loading, error, refresh, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const navRef = useRef<HTMLUListElement>(null);
-
-  // 좁은 화면에서 메뉴가 가로로 넘칠 때 현재 메뉴가 보이도록 스크롤
-  useEffect(() => {
-    navRef.current
-      ?.querySelector('[aria-current="page"]')
-      ?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [pathname, user]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // 다른 화면으로 가면 모바일 메뉴를 닫는다
+  const [menuPath, setMenuPath] = useState(pathname);
+  if (menuPath !== pathname) {
+    setMenuPath(pathname);
+    setMenuOpen(false);
+  }
 
   useEffect(() => {
     if (!loading && !user && !error) {
@@ -78,6 +77,10 @@ function Shell({ children }: { children: ReactNode }) {
   const forbidden =
     (adminArea && !user.is_staff) || (SUPER_ONLY.some((p) => pathname.startsWith(p)) && !isSuper);
 
+  const roleLabel = isSuper ? "최고 관리자" : user.is_staff ? "기관 관리자" : null;
+  const userNav = nav.filter((n) => USER_NAV.includes(n));
+  const adminNav = nav.filter((n) => !USER_NAV.includes(n));
+
   return (
     <div className="flex min-h-screen flex-col">
       <a
@@ -86,62 +89,210 @@ function Shell({ children }: { children: ReactNode }) {
       >
         본문 바로가기
       </a>
-      <header className="no-print border-b border-navy-800 bg-navy-900 text-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <Link href="/" className="flex items-center gap-2 font-bold tracking-tight">
-            <Logo size={32} className="rounded-lg ring-1 ring-white/25" />
-            public goods manage
+
+      {/* 맨 위 작은 줄: 일반 웹사이트처럼 로그인 정보·내 정보·로그아웃 */}
+      <div className="no-print hidden border-b border-navy-100 bg-navy-50 text-xs text-navy-600 md:block">
+        <div className="mx-auto flex max-w-6xl items-center justify-end gap-3 px-4 py-1.5">
+          <span>
+            <b className="font-semibold text-navy-800">{user.name}</b> 님
+            {roleLabel && (
+              <span className="ml-1.5 rounded bg-teal-50 px-1.5 py-0.5 font-bold text-teal-800 ring-1 ring-inset ring-teal-200">
+                {roleLabel}
+              </span>
+            )}
+          </span>
+          <span aria-hidden className="text-navy-200">|</span>
+          <Link href="/me/profile" className="hover:text-navy-900 hover:underline">
+            내 정보
           </Link>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-navy-100">
-              {user.name}
-              {(isSuper || user.is_staff) && (
-                <span className="ml-1.5 rounded bg-teal-500 px-1.5 py-0.5 text-xs font-bold text-navy-900">
-                  {isSuper ? "최고 관리자" : "기관 관리자"}
-                </span>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-md border border-navy-500 px-2.5 py-1 font-semibold hover:bg-navy-800"
-            >
-              로그아웃
-            </button>
-          </div>
+          <span aria-hidden className="text-navy-200">|</span>
+          <button type="button" onClick={logout} className="hover:text-navy-900 hover:underline">
+            로그아웃
+          </button>
         </div>
-        <nav aria-label="주요 메뉴" className="border-t border-navy-800">
-          {/* 오른쪽 끝을 흐리게 해서 메뉴가 더 있다는 것을 보여 줌 (넓은 화면에서는 없음) */}
-          <ul
-            ref={navRef}
-            className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 text-sm [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none] lg:[mask-image:none]"
+      </div>
+
+      <header className="no-print sticky top-0 z-40 border-b border-navy-100 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
+          <Link href="/" className="flex shrink-0 items-center gap-2 text-lg font-extrabold tracking-tight text-navy-900">
+            <Logo size={34} className="rounded-lg" />
+            <span>
+              public goods <span className="text-teal-700">manage</span>
+            </span>
+          </Link>
+          <HeaderSearch className="ml-auto hidden w-full max-w-sm md:flex" />
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
+            className="ml-auto rounded-lg border border-navy-200 px-3 py-2 text-sm font-semibold text-navy-800 hover:bg-navy-50 md:hidden"
           >
-            {nav.map((n) => {
-              const active = isActive(pathname, n.href);
-              return (
-                <li key={n.href} className="shrink-0">
-                  <Link
-                    href={n.href}
-                    aria-current={active ? "page" : undefined}
-                    className={`block border-b-[3px] px-3 py-2.5 font-semibold ${
-                      active ? "border-teal-400 text-white" : "border-transparent text-navy-200 hover:text-white"
-                    }`}
-                  >
-                    {n.label}
-                  </Link>
-                </li>
-              );
-            })}
+            <span aria-hidden>{menuOpen ? "✕" : "☰"}</span>
+            <span className="sr-only">{menuOpen ? "메뉴 닫기" : "메뉴 열기"}</span>
+          </button>
+        </div>
+
+        {/* 넓은 화면: 가로 메뉴 */}
+        <nav aria-label="주요 메뉴" className="hidden border-t border-navy-100 md:block">
+          <ul className="mx-auto flex max-w-6xl items-center gap-1 px-2 text-[15px]">
+            {userNav.map((n) => (
+              <NavLink key={n.href} item={n} pathname={pathname} />
+            ))}
+            {adminNav.length > 0 && (
+              <>
+                <li aria-hidden className="mx-2 h-4 w-px bg-navy-200" />
+                <li className="px-1 text-xs font-bold text-navy-400">관리</li>
+                {adminNav.map((n) => (
+                  <NavLink key={n.href} item={n} pathname={pathname} />
+                ))}
+              </>
+            )}
           </ul>
         </nav>
+
+        {/* 좁은 화면: ☰ 로 여는 메뉴 */}
+        {menuOpen && (
+          <div id="mobile-menu" className="max-h-[calc(100vh-4rem)] overflow-y-auto border-t border-navy-100 bg-white md:hidden">
+            <div className="px-4 py-3">
+              <HeaderSearch className="flex" onDone={() => setMenuOpen(false)} />
+              <p className="mt-3 text-sm text-navy-600">
+                <b className="text-navy-900">{user.name}</b> 님{roleLabel && ` · ${roleLabel}`}
+              </p>
+            </div>
+            <MobileGroup title="이용" items={userNav} pathname={pathname} />
+            {adminNav.length > 0 && <MobileGroup title="관리" items={adminNav} pathname={pathname} />}
+            <div className="border-t border-navy-100 px-4 py-3">
+              <button type="button" onClick={logout} className={`${btn.secondary} w-full`}>
+                로그아웃
+              </button>
+            </div>
+          </div>
+        )}
       </header>
+
       <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">
         {forbidden ? <Forbidden /> : children}
       </main>
-      <footer className="no-print border-t border-navy-100 py-4 text-center text-xs text-navy-500">
-        public goods manage · 모든 시간은 한국 시간(KST) 기준
+
+      <footer className="no-print mt-8 border-t border-navy-100 bg-navy-50 text-sm text-navy-600">
+        <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:grid-cols-[1.5fr_1fr_1fr]">
+          <div>
+            <p className="flex items-center gap-2 font-bold text-navy-900">
+              <Logo size={24} className="rounded" /> public goods manage
+            </p>
+            <p className="mt-2 leading-relaxed">
+              학교·주민센터 등 공공기관의 공동 물품을 찾아 예약하고 빌리는 서비스입니다.
+              <br />
+              모든 시간은 한국 시간(KST) 기준입니다.
+            </p>
+          </div>
+          <FooterLinks title="이용 안내" items={userNav.filter((n) => n.href !== "/")} />
+          {adminNav.length > 0 ? <FooterLinks title="관리" items={adminNav} /> : <div />}
+        </div>
+        <div className="border-t border-navy-100">
+          <p className="mx-auto max-w-6xl px-4 py-4 text-xs text-navy-500">
+            © {new Date().getFullYear()} public goods manage. 물품 대여 문의는 각 기관 담당자에게 해 주세요.
+          </p>
+        </div>
       </footer>
     </div>
+  );
+}
+
+type NavItem = { href: string; label: string };
+
+function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const active = isActive(pathname, item.href);
+  return (
+    <li className="shrink-0">
+      <Link
+        href={item.href}
+        aria-current={active ? "page" : undefined}
+        className={`block border-b-[3px] px-3 py-3 font-semibold ${
+          active ? "border-teal-600 text-teal-800" : "border-transparent text-navy-700 hover:text-navy-900"
+        }`}
+      >
+        {item.label}
+      </Link>
+    </li>
+  );
+}
+
+function MobileGroup({ title, items, pathname }: { title: string; items: NavItem[]; pathname: string }) {
+  return (
+    <div className="border-t border-navy-100 px-2 py-2">
+      <p className="px-2 py-1 text-xs font-bold text-navy-400">{title}</p>
+      <ul>
+        {items.map((n) => {
+          const active = isActive(pathname, n.href);
+          return (
+            <li key={n.href}>
+              <Link
+                href={n.href}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center justify-between rounded-lg px-3 py-2.5 font-semibold ${
+                  active ? "bg-teal-50 text-teal-800" : "text-navy-800 hover:bg-navy-50"
+                }`}
+              >
+                {n.label}
+                <span aria-hidden className="text-navy-300">›</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function FooterLinks({ title, items }: { title: string; items: NavItem[] }) {
+  return (
+    <div>
+      <p className="font-bold text-navy-900">{title}</p>
+      <ul className="mt-2 grid gap-1.5">
+        {items.map((n) => (
+          <li key={n.href}>
+            <Link href={n.href} className="hover:text-navy-900 hover:underline">
+              {n.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** 머리말 검색: 물품 이름·관리번호로 물품 찾기 화면을 연다 */
+function HeaderSearch({ className = "", onDone }: { className?: string; onDone?: () => void }) {
+  const router = useRouter();
+  const [q, setQ] = useState("");
+  return (
+    <form
+      role="search"
+      className={`items-center overflow-hidden rounded-full border border-navy-200 bg-white focus-within:border-teal-600 ${className}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const v = q.trim();
+        router.push(v ? `/items?q=${encodeURIComponent(v)}` : "/items");
+        onDone?.();
+      }}
+    >
+      <label className="sr-only" htmlFor={onDone ? "header-q-m" : "header-q"}>
+        물품 검색
+      </label>
+      <input
+        id={onDone ? "header-q-m" : "header-q"}
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="물품 이름이나 관리번호 검색"
+        className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-navy-900 outline-none placeholder:text-navy-300"
+      />
+      <button type="submit" className="shrink-0 px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50">
+        검색
+      </button>
+    </form>
   );
 }
 

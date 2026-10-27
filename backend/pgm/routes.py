@@ -29,6 +29,7 @@ from .models import (
     Organization,
     Reservation,
     User,
+    get_item,
 )
 from .schemas import (
     ITEM_LIGHT,
@@ -95,8 +96,8 @@ def logout(response: Response):
 # ================================================================ 물품 (로그인 사용자)
 
 
-def _item_or_404(session, item_id: int) -> Item:
-    item = session.get(Item, item_id)
+def _item_or_404(session, item_id: int, with_image: bool = False) -> Item:
+    item = session.get(Item, item_id) if with_image else get_item(session, item_id)
     if not item:
         raise HTTPException(404, "물품을 찾을 수 없습니다.")
     return item
@@ -279,7 +280,7 @@ def item_availability(item_id: int, start: datetime, end: datetime, user: Curren
 
 @router.get("/items/{item_id}/image")
 def item_image(item_id: int, user: CurrentUser, session: SessionDep):
-    item = _item_or_404(session, item_id)
+    item = _item_or_404(session, item_id, with_image=True)
     if item.image_data is None:
         raise HTTPException(404, "등록된 사진이 없습니다.")
     return Response(
@@ -316,7 +317,7 @@ def my_reservations(
 @router.get("/reservations/{reservation_id}")
 def reservation_detail(reservation_id: int, user: CurrentUser, session: SessionDep):
     r = session.get(Reservation, reservation_id)
-    item = session.get(Item, r.item_id) if r else None
+    item = get_item(session, r.item_id) if r else None
     if not r or (r.user_id != user.id and not can_manage(session, user, item.org_id if item else None)):
         raise HTTPException(404, "예약을 찾을 수 없습니다.")
     return {"reservation": reservations_out(session, [r])[0]}
@@ -366,28 +367,46 @@ def _res_in_scope(query, ids):
     return query.join(Item, Item.id == Reservation.item_id).where(col(Item.org_id).in_(ids or {-1}))
 
 
-def _admin_alerts(session, now: datetime, ids) -> list[dict]:
+def _unreturned_by_item(session, item_ids) -> dict[int, list[Reservation]]:
+    """물품별 미반납 대여 (질의 한 번)"""
+    out: dict[int, list[Reservation]] = {}
+    ids = {i for i in item_ids if i is not None}
+    if ids:
+        for r in session.exec(
+            select(Reservation).where(col(Reservation.item_id).in_(ids), col(Reservation.status).in_(UNRETURNED))
+        ).all():
+            out.setdefault(r.item_id, []).append(r)
+    return out
+
+
+def _items_light(session, item_ids) -> dict[int, Item]:
+    ids = {i for i in item_ids if i is not None}
+    if not ids:
+        return {}
+    return {i.id: i for i in session.exec(select(Item).options(ITEM_LIGHT).where(col(Item.id).in_(ids))).all()}
+
+
+def _admin_alerts(session, now: datetime, soon: list[Reservation]) -> list[tuple[Reservation, list[str]]]:
     """인계가 막힌 확정 예약: 24시간 이내 시작인데 수리 중이거나 이전 대여가 미반납."""
-    soon = session.exec(
-        _res_in_scope(select(Reservation), ids)
-        .where(
-            Reservation.status == R_APPROVED,
-            Reservation.start_at <= now + timedelta(hours=24),
-            Reservation.end_at > now,
-        )
-        .order_by(Reservation.start_at)
-    ).all()
+    items = _items_light(session, (r.item_id for r in soon))
+    unreturned = _unreturned_by_item(session, items)
     alerts = []
     for r in soon:
-        item = session.get(Item, r.item_id)
         blockers = [
             b
-            for b in services.checkout_blockers(session, r, item, now)
+            for b in services.checkout_blockers(session, r, items[r.item_id], now, unreturned.get(r.item_id, []))
             if not b.startswith("예약 시작")  # 아직 이른 것은 경고가 아님
         ]
         if blockers:
-            alerts.append({"reservation": reservations_out(session, [r])[0], "blockers": blockers})
+            alerts.append((r, blockers))
     return alerts
+
+
+def _out_many(session, *groups: list[Reservation]) -> list[list[dict]]:
+    """여러 예약 묶음을 질의 한 번으로 변환"""
+    allrows = {r.id: r for g in groups for r in g}
+    converted = dict(zip(allrows, reservations_out(session, list(allrows.values()))))
+    return [[converted[r.id] for r in g] for g in groups]
 
 
 def _count(session, query) -> int:
@@ -419,50 +438,62 @@ def dashboard(user: CurrentUser, session: SessionDep):
             .limit(5)
         ).all()
     )
-    data = reservations_out(session, mine)
-    out = {
+    ids = managed_org_ids(session, user)
+    if not (ids is None or ids):
+        data, recent_out = _out_many(session, mine, recent)
+        return {
+            "renting": [r for r in data if r["status"] in UNRETURNED],
+            "upcoming": [r for r in data if r["status"] in (R_PENDING, R_APPROVED)],
+            "recent": recent_out,
+            "staff": None,
+        }
+
+    base = _res_in_scope(select(Reservation.status, func.count()), ids).where(
+        col(Reservation.status).in_((R_PENDING, *UNRETURNED))
+    )
+    by_status = dict(session.exec(base.group_by(Reservation.status)).all())
+    overdue_rows = list(
+        session.exec(
+            _res_in_scope(select(Reservation), ids)
+            .where(col(Reservation.status).in_(UNRETURNED), Reservation.end_at <= now)
+            .order_by(Reservation.end_at)
+        ).all()
+    )
+    rep_q = select(DamageReport.id).where(col(DamageReport.status).in_(REPORT_OPEN))
+    if ids is not None:
+        rep_q = rep_q.join(Item, Item.id == DamageReport.item_id).where(col(Item.org_id).in_(ids or {-1}))
+    stu_q = select(User.id).where(User.is_student == True, User.student_status == "pending")  # noqa: E712
+    if ids is not None:
+        stu_q = stu_q.where(col(User.school_id).in_(ids or {-1}))
+    handovers = list(
+        session.exec(
+            _res_in_scope(select(Reservation), ids)
+            .where(Reservation.status == R_APPROVED, Reservation.start_at <= now + timedelta(hours=24), Reservation.end_at > now)
+            .order_by(Reservation.start_at)
+        ).all()
+    )
+    alerts = _admin_alerts(session, now, handovers)
+    data, recent_out, overdue_out, handover_out, alert_out = _out_many(
+        session, mine, recent, overdue_rows[:10], handovers[:10], [r for r, _ in alerts]
+    )
+    return {
         "renting": [r for r in data if r["status"] in UNRETURNED],
         "upcoming": [r for r in data if r["status"] in (R_PENDING, R_APPROVED)],
-        "recent": reservations_out(session, recent),
-        "staff": None,
-    }
-    ids = managed_org_ids(session, user)
-    if ids is None or ids:
-        base = _res_in_scope(select(Reservation.id), ids)
-        overdue_rows = list(
-            session.exec(
-                _res_in_scope(select(Reservation), ids)
-                .where(col(Reservation.status).in_(UNRETURNED), Reservation.end_at <= now)
-                .order_by(Reservation.end_at)
-            ).all()
-        )
-        rep_q = select(DamageReport.id).where(col(DamageReport.status).in_(REPORT_OPEN))
-        if ids is not None:
-            rep_q = rep_q.join(Item, Item.id == DamageReport.item_id).where(col(Item.org_id).in_(ids or {-1}))
-        stu_q = select(User.id).where(User.is_student == True, User.student_status == "pending")  # noqa: E712
-        if ids is not None:
-            stu_q = stu_q.where(col(User.school_id).in_(ids or {-1}))
-        handovers = list(
-            session.exec(
-                _res_in_scope(select(Reservation), ids)
-                .where(Reservation.status == R_APPROVED, Reservation.start_at <= now + timedelta(hours=24), Reservation.end_at > now)
-                .order_by(Reservation.start_at)
-            ).all()
-        )
-        out["staff"] = {
+        "recent": recent_out,
+        "staff": {
             "counts": {
-                "in_use": _count(session, base.where(col(Reservation.status).in_(UNRETURNED))),
-                "pending": _count(session, base.where(Reservation.status == R_PENDING)),
+                "in_use": sum(by_status.get(st, 0) for st in UNRETURNED),
+                "pending": by_status.get(R_PENDING, 0),
                 "overdue": len(overdue_rows),
-                "return_requested": _count(session, base.where(Reservation.status == R_RETURN_REQUESTED)),
+                "return_requested": by_status.get(R_RETURN_REQUESTED, 0),
                 "open_reports": _count(session, rep_q),
                 "pending_students": _count(session, stu_q),
             },
-            "overdue": reservations_out(session, overdue_rows[:10]),
-            "handovers": reservations_out(session, handovers[:10]),
-            "alerts": _admin_alerts(session, now, ids),
-        }
-    return out
+            "overdue": overdue_out,
+            "handovers": handover_out,
+            "alerts": [{"reservation": o, "blockers": b} for o, (_, b) in zip(alert_out, alerts)],
+        },
+    }
 
 
 # ================================================================ 관리자: 예약·대여 (관리 기관 한정)
@@ -505,21 +536,40 @@ def admin_reservations(
     now = now_utc()
     # 판단에 필요한 경고: 승인 대기는 확정 예약과의 충돌·대여 자격, 확정 예약은 인계 차단 사유
     users = {u.id: u for u in session.exec(select(User).where(col(User.id).in_({r.user_id for r in rows} or {-1}))).all()}
+    pending = [r for r in rows if r.status == R_PENDING]
+    approved = [r for r in rows if r.status == R_APPROVED]
+    items = _items_light(session, (r.item_id for r in pending + approved))
+    orgs = orgs_by_id(session, (i.org_id for i in items.values()))
+    unreturned = _unreturned_by_item(session, (r.item_id for r in approved))
+    # 승인 대기와 겹칠 수 있는 예약을 한 번에 읽고 물품별로 나눠 둔다
+    nearby: dict[int, list[Reservation]] = {}
+    if pending:
+        for o in session.exec(
+            select(Reservation)
+            .where(
+                col(Reservation.item_id).in_({r.item_id for r in pending}),
+                col(Reservation.status).in_((*OCCUPYING, R_PENDING)),
+                Reservation.start_at < max(r.end_at for r in pending),
+                Reservation.end_at > min(r.start_at for r in pending),
+            )
+            .order_by(Reservation.start_at)
+        ).all():
+            nearby.setdefault(o.item_id, []).append(o)
     for row, r in zip(data, rows):
         if r.status == R_PENDING:
-            item = session.get(Item, r.item_id)
-            clash = services.find_overlapping(session, r.item_id, r.start_at, r.end_at, exclude_id=r.id)
-            pending_clash = services.find_overlapping(
-                session, r.item_id, r.start_at, r.end_at, statuses=(R_PENDING,), exclude_id=r.id
-            )
-            row["conflicts"] = [c.id for c in clash]
-            row["pending_overlaps"] = [c.id for c in pending_clash]
+            item = items[r.item_id]
+            overlaps = [
+                o for o in nearby.get(r.item_id, []) if o.id != r.id and o.start_at < r.end_at and o.end_at > r.start_at
+            ]
+            row["conflicts"] = [o.id for o in overlaps if o.status in OCCUPYING]
+            row["pending_overlaps"] = [o.id for o in overlaps if o.status == R_PENDING]
             row["item_blocked"] = row["item"]["status"] != "normal" if row["item"] else False
-            ok, why = eligibility(users[r.user_id], item, session.get(Organization, item.org_id) if item.org_id else None)
+            ok, why = eligibility(users[r.user_id], item, orgs.get(item.org_id))
             row["ineligible_reason"] = None if ok else why
         elif r.status == R_APPROVED:
-            item = session.get(Item, r.item_id)
-            row["blockers"] = services.checkout_blockers(session, r, item, now)
+            row["blockers"] = services.checkout_blockers(
+                session, r, items[r.item_id], now, unreturned.get(r.item_id, [])
+            )
     return {"reservations": data}
 
 

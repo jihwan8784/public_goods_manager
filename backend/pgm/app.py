@@ -87,7 +87,7 @@ def create_app(run_startup: bool = True) -> FastAPI:
 
     @app.middleware("http")
     async def no_store(request: Request, call_next):
-        if run_startup:
+        if run_startup and not _started:  # 준비가 끝난 뒤에는 스레드 전환 없이 바로 처리
             await run_in_threadpool(ensure_startup)
         response = await call_next(request)
         response.headers.setdefault("Cache-Control", "no-store")

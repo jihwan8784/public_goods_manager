@@ -313,3 +313,28 @@ def test_other_items_are_independent(clients, db, item):
     b = reserve(clients["bob"], other.id, future(1), future(3)).json()["reservation"]["id"]
     assert clients["admin"].post(f"/admin/reservations/{a}/approve").status_code == 200
     assert clients["admin"].post(f"/admin/reservations/{b}/approve").status_code == 200
+
+
+def test_admin_list_warnings_match_rules(clients, users, item, db):
+    """관리자 예약 목록의 충돌·인계 경고 (한 번에 읽어 계산해도 규칙과 같아야 함)"""
+    other = make_item(db, code="MIC-002")
+    confirmed = insert(db, item, users["admin2"], future(1), future(3), "approved")
+    p1 = insert(db, item, users["alice"], future(2), future(4), "pending")  # 확정과 겹침
+    p2 = insert(db, item, users["bob"], future(3), future(5), "pending")  # p1 과만 겹침 (끝==시작은 아님)
+    p3 = insert(db, other, users["bob"], future(2), future(4), "pending")  # 다른 물품
+    rented = insert(db, other, users["alice"], now_utc() - timedelta(days=1), now_utc() - timedelta(hours=1), "in_use")
+    nxt = insert(db, other, users["admin2"], now_utc() + timedelta(minutes=5), now_utc() + timedelta(hours=1), "approved")
+
+    rows = {r["id"]: r for r in clients["admin"].get("/admin/reservations").json()["reservations"]}
+    assert rows[p1.id]["conflicts"] == [confirmed.id]
+    assert rows[p1.id]["pending_overlaps"] == [p2.id]
+    assert rows[p2.id]["conflicts"] == []  # confirmed 끝 == p2 시작
+    assert rows[p2.id]["pending_overlaps"] == [p1.id]
+    assert rows[p3.id]["conflicts"] == [] and rows[p3.id]["pending_overlaps"] == []
+    assert any(f"#{rented.id}" in b for b in rows[nxt.id]["blockers"])
+    assert not any("반납" in b for b in rows[confirmed.id]["blockers"])
+
+    staff = clients["admin"].get("/dashboard").json()["staff"]
+    assert staff["counts"]["pending"] == 3
+    assert staff["counts"]["in_use"] == 1 and staff["counts"]["overdue"] == 1
+    assert [a["reservation"]["id"] for a in staff["alerts"]] == [nxt.id]

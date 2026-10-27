@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { clearCachedUser } from "@/components/AuthProvider";
 import ResendVerification from "@/components/ResendVerification";
 import { btn, inputCls, labelCls } from "@/components/ui";
 
@@ -51,6 +52,7 @@ export default function LoginForm() {
         body: { email, password, admin_code: needCode ? adminCode : undefined },
         noRedirect: true,
       });
+      clearCachedUser();
       window.location.assign(safeNext(params.get("next")));
     } catch (err) {
       const code = err instanceof ApiError ? err.code : undefined;

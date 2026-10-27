@@ -19,7 +19,7 @@
 }
 
 body {
-  background: #f6f8fb;
+  background: #fff;
   color: var(--color-navy-900);
   font-family: var(--font-sans);
   word-break: keep-all;

@@ -76,7 +76,7 @@ def ensure_startup() -> None:
 
 
 def create_app(run_startup: bool = True) -> FastAPI:
-    app = FastAPI(title="public goods manage API")
+    app = FastAPI(title=f"{config.APP_NAME} API")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.ALLOWED_ORIGINS,
@@ -110,7 +110,7 @@ def create_app(run_startup: bool = True) -> FastAPI:
 
     @app.get("/")
     def health():
-        return {"service": "public goods manage", "status": "ok"}
+        return {"service": config.APP_NAME, "status": "ok"}
 
     app.include_router(router)
     app.include_router(people_router)

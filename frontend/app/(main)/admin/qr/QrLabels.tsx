@@ -7,6 +7,7 @@ import { btn, Empty, ErrorState, Loading, PageHeader } from "@/components/ui";
 import { itemUrl, qrSvg } from "@/lib/qr";
 import type { ItemFull } from "@/lib/types";
 import { useLoad } from "@/lib/useLoad";
+import { APP_NAME } from "@/lib/brand";
 
 export default function QrLabels() {
   const idsParam = useSearchParams().get("ids") ?? "";
@@ -61,7 +62,7 @@ export default function QrLabels() {
               />
               <p className="mt-1 font-mono text-lg font-bold">{i.asset_code}</p>
               <p className="text-sm">{i.name}</p>
-              <p className="text-xs text-navy-600">public goods manage</p>
+              <p className="text-xs text-navy-600">{APP_NAME}</p>
             </li>
           ))}
         </ul>

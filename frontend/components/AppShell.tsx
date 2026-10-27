@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import Logo from "./Logo";
 import { btn, ErrorState, Forbidden, Loading } from "./ui";
+import { APP_NAME, APP_TAGLINE } from "@/lib/brand";
 
 const USER_NAV = [
   { href: "/", label: "홈" },
@@ -117,7 +118,8 @@ function Shell({ children }: { children: ReactNode }) {
           <Link href="/" className="flex shrink-0 items-center gap-2 text-lg font-extrabold tracking-tight text-navy-900">
             <Logo size={34} className="rounded-lg" />
             <span>
-              public goods <span className="text-teal-700">manage</span>
+              {APP_NAME.slice(0, 2)}
+              <span className="text-teal-700">{APP_NAME.slice(2)}</span>
             </span>
           </Link>
           <HeaderSearch className="ml-auto hidden w-full max-w-sm md:flex" />
@@ -179,10 +181,10 @@ function Shell({ children }: { children: ReactNode }) {
         <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:grid-cols-[1.5fr_1fr_1fr]">
           <div>
             <p className="flex items-center gap-2 font-bold text-navy-900">
-              <Logo size={24} className="rounded" /> public goods manage
+              <Logo size={24} className="rounded" /> {APP_NAME}
             </p>
             <p className="mt-2 leading-relaxed">
-              학교·주민센터 등 공공기관의 공동 물품을 찾아 예약하고 빌리는 서비스입니다.
+              {APP_TAGLINE}입니다. 지도에서 기관을 찾고 물품을 예약해 빌려 쓰세요.
               <br />
               모든 시간은 한국 시간(KST) 기준입니다.
             </p>
@@ -192,7 +194,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
         <div className="border-t border-navy-100">
           <p className="mx-auto max-w-6xl px-4 py-4 text-xs text-navy-500">
-            © {new Date().getFullYear()} public goods manage. 물품 대여 문의는 각 기관 담당자에게 해 주세요.
+            © {new Date().getFullYear()} {APP_NAME}. 물품 대여 문의는 각 기관 담당자에게 해 주세요.
           </p>
         </div>
       </footer>

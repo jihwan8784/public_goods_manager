@@ -1,4 +1,4 @@
-# public goods manage
+# 나눔곳간 (구 public goods manage)
 
 학교·주민센터 등 여러 공공기관의 공동 물품 대여 관리 웹. 회원가입·학생 인증·지도 지원. 화면은 모두 한국어.
 
